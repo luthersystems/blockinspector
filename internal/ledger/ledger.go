@@ -118,14 +118,19 @@ func (s *ledger) BlockHeight() (uint64, error) {
 	return info.GetHeight(), nil
 }
 
-type BlockIterator struct {
+type BlockIterator interface {
+	Next() (*common.Block, error)
+	Close()
+}
+
+type ledgerBlockIterator struct {
 	start uint64
 	end   uint64
 	iter  cledger.ResultsIterator
 }
 
 // Next returns the next block, or nil if there are no more blocks.
-func (s *BlockIterator) Next() (*common.Block, error) {
+func (s *ledgerBlockIterator) Next() (*common.Block, error) {
 	if s.iter == nil {
 		return nil, fmt.Errorf("closed")
 	}
@@ -158,7 +163,7 @@ func (s *BlockIterator) Next() (*common.Block, error) {
 }
 
 // Close frees the underlying resources.
-func (s *BlockIterator) Close() {
+func (s *ledgerBlockIterator) Close() {
 	if s.iter == nil {
 		return
 	}
@@ -171,7 +176,7 @@ func (s *BlockIterator) Close() {
 // If end == 0  or end > block height then it will iterate across all blocks.
 // If the ledger is a snapshot, and start < the snapshot height, then
 // it starts from the snapshot height.
-func (s *ledger) RangeBlocks(start uint64, end uint64) (*BlockIterator, error) {
+func (s *ledger) RangeBlocks(start uint64, end uint64) (*ledgerBlockIterator, error) {
 	if s.blockStore == nil {
 		return nil, fmt.Errorf("ledger closed")
 	}
@@ -196,7 +201,7 @@ func (s *ledger) RangeBlocks(start uint64, end uint64) (*BlockIterator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &BlockIterator{iter: iterator, start: start, end: end}, nil
+	return &ledgerBlockIterator{iter: iterator, start: start, end: end}, nil
 }
 
 // getFirstBlockNumberInLedger - Gets the number of the first block in the ledger.
@@ -240,4 +245,64 @@ func getBlockStoreProvider(fsPath string) (*blkstorage.BlockStoreProvider, error
 	}
 
 	return blockStoreProvider, nil
+}
+
+type simpleBlockIterator struct {
+	iter       *ledgerBlockIterator
+	ledger     *ledger
+	blockStore *blockStore
+}
+
+func (s *simpleBlockIterator) Close() {
+	if s.iter == nil {
+		return
+	}
+	s.iter = nil
+	s.iter.Close()
+	s.ledger.Close()
+	s.blockStore.Close()
+}
+
+func (s *simpleBlockIterator) Next() (*common.Block, error) {
+	if s.iter == nil {
+		return nil, fmt.Errorf("closed")
+	}
+	return s.iter.Next()
+}
+
+func RangeBlocks(ledgerDir string, channel string, start uint64, end uint64) (*simpleBlockIterator, error) {
+	blockStore, err := NewBlockStore(ledgerDir)
+	if err != nil {
+		return nil, err
+	}
+
+	err = blockStore.Open()
+	if err != nil {
+		return nil, err
+	}
+
+	ledger, err := blockStore.NewLedger(channel)
+	if err != nil {
+		blockStore.Close()
+		return nil, err
+	}
+
+	err = ledger.Open()
+	if err != nil {
+		blockStore.Close()
+		return nil, err
+	}
+
+	iter, err := ledger.RangeBlocks(0, 0)
+	if err != nil {
+		ledger.Close()
+		blockStore.Close()
+		return nil, err
+	}
+
+	return &simpleBlockIterator{
+		iter:       iter,
+		ledger:     ledger,
+		blockStore: blockStore,
+	}, nil
 }

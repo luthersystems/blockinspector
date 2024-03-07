@@ -45,6 +45,29 @@ func TestLedger(t *testing.T) {
 	iter, err := ledger.RangeBlocks(0, 0)
 	require.NoError(t, err)
 
+	defer iter.Close()
+
+	numBlocks := uint64(0)
+	for {
+		block, err := iter.Next()
+		require.NoError(t, err)
+		if block == nil {
+			break
+		}
+		numBlocks++
+	}
+
+	require.Equal(t, numBlocks, expectHeight)
+}
+
+func TestRangeBlocks(t *testing.T) {
+	channel := "mychannel"
+	expectHeight := uint64(8)
+	ledgerDir := SampleGoodLedgerDir
+
+	iter, err := RangeBlocks(ledgerDir, channel, 0, 0)
+	require.NoError(t, err)
+
 	numBlocks := uint64(0)
 	for {
 		block, err := iter.Next()
