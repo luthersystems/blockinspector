@@ -1,6 +1,9 @@
 package ledger
 
 import (
+	"bytes"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -75,6 +78,12 @@ func TestRangeBlocks(t *testing.T) {
 		if block == nil {
 			break
 		}
+		pBlock, err := processBlock(block)
+		require.NoError(t, err)
+
+		_, _ = io.Copy(os.Stderr, pBlock.Render())
+		_, _ = io.Copy(os.Stderr, bytes.NewBufferString("\n"))
+
 		numBlocks++
 	}
 
