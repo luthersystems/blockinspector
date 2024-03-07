@@ -25,6 +25,7 @@ type Block struct {
 	hash         string
 	blockNum     uint64
 	transactions []*Transaction
+	size         int
 }
 
 func (b *Block) Render() io.Reader {
@@ -33,11 +34,12 @@ func (b *Block) Render() io.Reader {
 	}
 	buf := new(bytes.Buffer)
 	table := tablewriter.NewWriter(buf)
-	table.SetHeader([]string{"Block Num", "Hash", "Num Txs"})
+	table.SetHeader([]string{"Block Num", "Hash", "Num Txs", "Size (bytes)"})
 	table.Append([]string{
 		fmt.Sprintf("%d", b.blockNum),
 		b.hash,
 		fmt.Sprintf("%d", len(b.transactions)),
+		fmt.Sprintf("%d", b.size),
 	})
 	table.Render() // Send output
 	for _, tx := range b.transactions {
@@ -66,12 +68,13 @@ func (b *Block) Valid() error {
 }
 
 // NewBlock creates an immutable block object.
-func NewBlock(hash string, blockNum uint64, transactions []*Transaction) *Block {
+func NewBlock(hash string, blockNum uint64, size int, transactions []*Transaction) *Block {
 	txsCopy := make([]*Transaction, len(transactions))
 	copy(txsCopy, transactions)
 	return &Block{
 		hash:         hash,
 		blockNum:     blockNum,
+		size:         size,
 		transactions: txsCopy,
 	}
 }
@@ -101,6 +104,7 @@ type Transaction struct {
 	event          []byte
 	chaincodeID    string
 	validationCode int32
+	size           int
 }
 
 func (t *Transaction) Render() io.Reader {
@@ -109,7 +113,7 @@ func (t *Transaction) Render() io.Reader {
 	}
 	buf := new(bytes.Buffer)
 	table := tablewriter.NewWriter(buf)
-	table.SetHeader([]string{"ID", "Reason", "Chaincode ID", "Validation Code", "Event"})
+	table.SetHeader([]string{"ID", "Reason", "Chaincode ID", "Validation Code", "Event", "Size (bytes)"})
 	eventStr := "No Event"
 	if len(t.Event()) > 0 {
 		eventStr = hex.EncodeToString(t.Event())
@@ -120,6 +124,7 @@ func (t *Transaction) Render() io.Reader {
 		t.ChaincodeID(),
 		fmt.Sprintf("%d", t.ValidationCode()),
 		eventStr,
+		fmt.Sprintf("%d", t.size),
 	})
 	table.Render() // Send output
 	return buf     // Return an empty string for the same reason as above
@@ -137,7 +142,7 @@ func (t *Transaction) Valid() error {
 }
 
 // NewTransaction creates an immutable transaction object.
-func NewTransaction(id TransactionID, reason string, event []byte, chaincodeID string, validationCode int32) *Transaction {
+func NewTransaction(id TransactionID, reason string, event []byte, chaincodeID string, validationCode int32, size int) *Transaction {
 	eventCopy := make([]byte, len(event))
 	copy(eventCopy, event)
 	return &Transaction{
@@ -145,6 +150,7 @@ func NewTransaction(id TransactionID, reason string, event []byte, chaincodeID s
 		reason:         reason,
 		event:          eventCopy,
 		validationCode: validationCode,
+		size:           size,
 	}
 }
 
@@ -222,10 +228,13 @@ func processBlock(blk *cb.Block) (*Block, error) {
 			return nil, fmt.Errorf("process block: %w", err)
 		}
 
-		out = append(out, NewTransaction(txID, reason, event, ccID, validationCode))
+		size := len(buf)
+
+		out = append(out, NewTransaction(txID, reason, event, ccID, validationCode, size))
 	}
 
-	processedBlock := NewBlock(blockHashHex, blockNum, out)
+	size := proto.Size(blk)
+	processedBlock := NewBlock(blockHashHex, blockNum, size, out)
 
 	return processedBlock, nil
 }
