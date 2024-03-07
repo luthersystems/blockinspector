@@ -7,7 +7,6 @@ require (
 	github.com/hyperledger/fabric v1.4.0-rc1.0.20240219033709-61fad7b14866
 	github.com/hyperledger/fabric-protos-go v0.3.3
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
 )
 
@@ -48,6 +47,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc6 // indirect
 	github.com/opencontainers/runc v1.1.12 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/sykesm/zap-logfmt v0.0.4 // indirect

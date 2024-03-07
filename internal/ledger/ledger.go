@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/luthersystems/blockinspector/internal/fileutil"
-
 	"github.com/hyperledger/fabric-protos-go/common"
 	cledger "github.com/hyperledger/fabric/common/ledger"
 	"github.com/hyperledger/fabric/common/ledger/blkstorage"
@@ -220,12 +218,12 @@ func getFirstBlockNumberInLedger(info *common.BlockchainInfo) uint64 {
 func getBlockStoreProvider(fsPath string) (*blkstorage.BlockStoreProvider, error) {
 	// Format path to block store
 	blockStorePath := kvledger.BlockStorePath(filepath.Join(fsPath, ledgersDataDirName))
-	isEmpty, err := fileutil.DirEmpty(blockStorePath)
+	isEmpty, err := dirEmpty(blockStorePath)
 	if err != nil {
 		return nil, err
 	}
 	if isEmpty {
-		return nil, fmt.Errorf("provided path %s is empty. Aborting verify", fsPath)
+		return nil, fmt.Errorf("path [%s] is empty", fsPath)
 	}
 	// Default fields for block store provider
 	conf := blkstorage.NewConf(blockStorePath, 0)
