@@ -12,11 +12,48 @@ const (
 )
 
 func TestLedger(t *testing.T) {
-	bs, err := NewBlockStore(SampleGoodLedgerDir)
+	expectChannel := "mychannel"
+	expectHeight := uint64(8)
+	ledgerDir := SampleGoodLedgerDir
+
+	bs, err := NewBlockStore(ledgerDir)
 	require.NoError(t, err)
 
-	ledgerIDs, err := bs.List()
+	err = bs.Open()
 	require.NoError(t, err)
 
-	require.Len(t, ledgerIDs, 1, "expected single ledger")
+	defer bs.Close()
+
+	channels, err := bs.ListChannels()
+	require.NoError(t, err)
+
+	require.Len(t, channels, 1, "expected single channel")
+	channel := channels[0]
+	require.Equal(t, channel, expectChannel)
+
+	ledger, err := bs.NewLedger(channel)
+	require.NoError(t, err)
+
+	err = ledger.Open()
+	require.NoError(t, err)
+
+	height, err := ledger.BlockHeight()
+	require.NoError(t, err)
+
+	require.Equal(t, height, expectHeight)
+
+	iter, err := ledger.RangeBlocks(0, 0)
+	require.NoError(t, err)
+
+	numBlocks := uint64(0)
+	for {
+		block, err := iter.Next()
+		require.NoError(t, err)
+		if block == nil {
+			break
+		}
+		numBlocks++
+	}
+
+	require.Equal(t, numBlocks, expectHeight)
 }

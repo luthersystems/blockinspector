@@ -23,14 +23,17 @@ type blockStore struct {
 }
 
 func NewBlockStore(path string) (*blockStore, error) {
+	if len(path) == 0 {
+		return nil, fmt.Errorf("empty path")
+	}
 	return &blockStore{path: path}, nil
 }
 
-func (s *blockStore) Open(path string) error {
+func (s *blockStore) Open() error {
 	if s.blockStoreProvider != nil {
 		return fmt.Errorf("blockStore open")
 	}
-	if blockStoreProvider, err := getBlockStoreProvider(path); err != nil {
+	if blockStoreProvider, err := getBlockStoreProvider(s.path); err != nil {
 		return err
 	} else {
 		s.blockStoreProvider = blockStoreProvider
@@ -47,35 +50,39 @@ func (s *blockStore) Close() error {
 	return nil
 }
 
-func (s *blockStore) List() ([]string, error) {
+func (s *blockStore) ListChannels() ([]string, error) {
+	if s.blockStoreProvider == nil {
+		return nil, fmt.Errorf("blockStore closed")
+	}
+
 	return s.blockStoreProvider.List()
 }
 
 type ledger struct {
 	parentProvider *blockStore
 	blockStore     *blkstorage.BlockStore
-	ledgerID       string
+	channelID      string
 }
 
-func (s *blockStore) NewLedger(ledgerID string) (*ledger, error) {
+func (s *blockStore) NewLedger(channelID string) (*ledger, error) {
 	hasLedger := false
-	ledgerIDs, err := s.List()
+	ledgerIDs, err := s.ListChannels()
 	if err != nil {
 		return nil, err
 	}
 	for _, id := range ledgerIDs {
-		if id == ledgerID {
+		if id == channelID {
 			hasLedger = true
 			break
 		}
 	}
 	if !hasLedger {
-		return nil, fmt.Errorf("missing ledger: %s", ledgerID)
+		return nil, fmt.Errorf("missing channel: %s", channelID)
 	}
 
 	return &ledger{
 		parentProvider: s,
-		ledgerID:       ledgerID,
+		channelID:      channelID,
 	}, nil
 }
 
@@ -83,7 +90,7 @@ func (s *ledger) Open() error {
 	if s.blockStore != nil {
 		return fmt.Errorf("ledger open")
 	}
-	if blockStore, err := s.parentProvider.blockStoreProvider.Open(s.ledgerID); err != nil {
+	if blockStore, err := s.parentProvider.blockStoreProvider.Open(s.channelID); err != nil {
 		return err
 	} else {
 		s.blockStore = blockStore
@@ -123,7 +130,7 @@ func (s *BlockIterator) Next() (*common.Block, error) {
 		return nil, fmt.Errorf("closed")
 	}
 	i := s.start
-	if i > s.end {
+	if i >= s.end {
 		return nil, nil
 	}
 
@@ -174,9 +181,9 @@ func (s *ledger) RangeBlocks(start uint64, end uint64) (*BlockIterator, error) {
 	}
 	maxHeight := info.GetHeight()
 	if end == 0 {
-		end = maxHeight + 1
+		end = maxHeight
 	} else if end > maxHeight {
-		end = maxHeight + 1
+		end = maxHeight
 	}
 	firstBlockNumber := getFirstBlockNumberInLedger(info)
 	if start < firstBlockNumber {
