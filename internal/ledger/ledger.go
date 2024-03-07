@@ -117,7 +117,7 @@ func (s *ledger) BlockHeight() (uint64, error) {
 }
 
 type BlockIterator interface {
-	Next() (*common.Block, error)
+	Next() (CommonBlock, error)
 	Close()
 }
 
@@ -128,7 +128,7 @@ type ledgerBlockIterator struct {
 }
 
 // Next returns the next block, or nil if there are no more blocks.
-func (s *ledgerBlockIterator) Next() (*common.Block, error) {
+func (s *ledgerBlockIterator) Next() (*CommonBlock, error) {
 	if s.iter == nil {
 		return nil, fmt.Errorf("closed")
 	}
@@ -157,7 +157,7 @@ func (s *ledgerBlockIterator) Next() (*common.Block, error) {
 		return nil, fmt.Errorf("the next block is expected to be %d but got %d", i, block.Header.Number)
 	}
 
-	return block, nil
+	return &CommonBlock{*block}, nil
 }
 
 // Close frees the underlying resources.
@@ -261,11 +261,15 @@ func (s *simpleBlockIterator) Close() {
 	s.blockStore.Close()
 }
 
-func (s *simpleBlockIterator) Next() (*common.Block, error) {
+func (s *simpleBlockIterator) Next() (*CommonBlock, error) {
 	if s.iter == nil {
 		return nil, fmt.Errorf("closed")
 	}
-	return s.iter.Next()
+	if blk, err := s.iter.Next(); err != nil {
+		return nil, err
+	} else {
+		return blk, nil
+	}
 }
 
 func RangeBlocks(ledgerDir string, channel string, start uint64, end uint64) (*simpleBlockIterator, error) {

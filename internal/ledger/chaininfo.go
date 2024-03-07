@@ -1,16 +1,17 @@
 package ledger
 
 import (
-	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/golang/protobuf/proto" //nolint SA1019 hlf does not support latest protobuf
+	"github.com/hyperledger/fabric-protos-go/common"
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	fabricpeer "github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/olekukonko/tablewriter"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -19,8 +20,23 @@ const (
 
 type TransactionID string
 
-// Block is a container for the transaction information exported
-// by QueryBlock.
+type CommonBlock struct {
+	common.Block
+}
+
+func (s *CommonBlock) Write(w io.Writer) {
+	if s == nil {
+		return
+	}
+	if blk, err := processBlock(&s.Block); err != nil {
+		logrus.WithError(err).Error("process block")
+		return
+	} else {
+		blk.Write(w)
+	}
+}
+
+// Block is a container for the transaction information.
 type Block struct {
 	hash         string
 	blockNum     uint64
@@ -28,12 +44,15 @@ type Block struct {
 	size         int
 }
 
-func (b *Block) Render() io.Reader {
-	if b == nil {
-		return bytes.NewBufferString("Empty Block")
+func (b *Block) Write(w io.Writer) {
+	if w == nil {
+		return
 	}
-	buf := new(bytes.Buffer)
-	table := tablewriter.NewWriter(buf)
+	if b == nil {
+		fmt.Fprint(w, "empty block")
+		return
+	}
+	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"Block Num", "Hash", "Num Txs", "Size (bytes)"})
 	table.Append([]string{
 		fmt.Sprintf("%d", b.blockNum),
@@ -43,9 +62,8 @@ func (b *Block) Render() io.Reader {
 	})
 	table.Render() // Send output
 	for _, tx := range b.transactions {
-		_, _ = io.Copy(buf, tx.Render())
+		tx.Write(w)
 	}
-	return buf // Return an empty string for the same reason as above
 }
 
 // Valid validates a block.
@@ -107,14 +125,14 @@ type Transaction struct {
 	size           int
 }
 
-func (t *Transaction) Render() io.Reader {
+func (t *Transaction) Write(w io.Writer) {
 	if t == nil {
-		return bytes.NewBufferString("Empty Transaction")
+		fmt.Fprint(w, "empty block")
+		return
 	}
-	buf := new(bytes.Buffer)
-	table := tablewriter.NewWriter(buf)
+	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"ID", "Reason", "Chaincode ID", "Validation Code", "Event", "Size (bytes)"})
-	eventStr := "No Event"
+	eventStr := "<none>"
 	if len(t.Event()) > 0 {
 		eventStr = hex.EncodeToString(t.Event())
 	}
@@ -127,7 +145,6 @@ func (t *Transaction) Render() io.Reader {
 		fmt.Sprintf("%d", t.size),
 	})
 	table.Render() // Send output
-	return buf     // Return an empty string for the same reason as above
 }
 
 // Valid validates a transaction.

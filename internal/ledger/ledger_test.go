@@ -1,8 +1,7 @@
 package ledger
 
 import (
-	"bytes"
-	"io"
+	"fmt"
 	"os"
 	"testing"
 
@@ -78,11 +77,8 @@ func TestRangeBlocks(t *testing.T) {
 		if block == nil {
 			break
 		}
-		pBlock, err := processBlock(block)
-		require.NoError(t, err)
-
-		_, _ = io.Copy(os.Stderr, pBlock.Render())
-		_, _ = io.Copy(os.Stderr, bytes.NewBufferString("\n"))
+		block.Write(os.Stderr)
+		fmt.Fprintln(os.Stderr)
 
 		numBlocks++
 	}

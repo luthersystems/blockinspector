@@ -3,6 +3,7 @@ module github.com/luthersystems/blockinspector
 go 1.22.0
 
 require (
+	github.com/alecthomas/kong v0.8.1
 	github.com/golang/protobuf v1.5.3
 	github.com/hyperledger/fabric v1.4.0-rc1.0.20240219033709-61fad7b14866
 	github.com/hyperledger/fabric-protos-go v0.3.3
