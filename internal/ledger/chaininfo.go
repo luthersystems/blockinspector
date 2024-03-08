@@ -214,13 +214,21 @@ func processBlock(blk *cb.Block) (*Block, error) {
 	}
 	blockHashHex := hex.EncodeToString(blockHash)
 
-	if len(transactionsIn) != len(filterIn) {
-		return nil, fmt.Errorf("process block: mismatched parallel arrays")
-	}
-
 	out := make([]*Transaction, 0, len(blk.GetData().GetData()))
 
 	for i, buf := range blk.GetData().GetData() {
+		validationCode := int32(-1)
+		reason := ""
+		// NOTE: orderer chains do not have filters, so return -1
+		if len(transactionsIn) == len(filterIn) {
+			validationCode = int32(filterIn[i])
+			var ok bool
+			reason, ok = fabricpeer.TxValidationCode_name[validationCode]
+			if !ok {
+				return nil, fmt.Errorf("process block: invalid validation code [%d]", validationCode)
+			}
+		}
+
 		txID, err := getTransactionID(buf)
 		if err != nil {
 			return nil, fmt.Errorf("process block: %w", err)
@@ -231,13 +239,6 @@ func processBlock(blk *cb.Block) (*Block, error) {
 		// anything that isn't a regular transaction.
 		if len(txID) == 0 {
 			continue
-		}
-
-		validationCode := int32(filterIn[i])
-
-		reason, ok := fabricpeer.TxValidationCode_name[validationCode]
-		if !ok {
-			return nil, fmt.Errorf("process block: invalid validation code [%d]", validationCode)
 		}
 
 		event, ccID, err := getEvent(buf)

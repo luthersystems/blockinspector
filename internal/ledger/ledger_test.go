@@ -18,7 +18,7 @@ func TestLedger(t *testing.T) {
 	expectHeight := uint64(8)
 	ledgerDir := SampleGoodLedgerDir
 
-	bs, err := NewBlockStore(ledgerDir)
+	bs, err := NewBlockStore(ledgerDir, false)
 	require.NoError(t, err)
 
 	err = bs.Open()
@@ -67,7 +67,7 @@ func TestRangeBlocks(t *testing.T) {
 	expectHeight := uint64(8)
 	ledgerDir := SampleGoodLedgerDir
 
-	iter, err := RangeBlocks(ledgerDir, channel, 0, 0)
+	iter, err := RangeBlocks(ledgerDir, false, channel, 0, 0)
 	require.NoError(t, err)
 
 	numBlocks := uint64(0)

@@ -3,6 +3,7 @@ package ledger
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	cledger "github.com/hyperledger/fabric/common/ledger"
@@ -13,29 +14,32 @@ import (
 
 const (
 	ledgersDataDirName = "ledgersData"
+	ordererDataDirName = "orderer"
 )
 
 type blockStore struct {
 	blockStoreProvider *blkstorage.BlockStoreProvider
 	path               string
+	orderer            bool
 }
 
-func NewBlockStore(path string) (*blockStore, error) {
+func NewBlockStore(path string, orderer bool) (*blockStore, error) {
 	if len(path) == 0 {
 		return nil, fmt.Errorf("empty path")
 	}
-	return &blockStore{path: path}, nil
+	return &blockStore{path: path, orderer: orderer}, nil
 }
 
 func (s *blockStore) Open() error {
 	if s.blockStoreProvider != nil {
 		return fmt.Errorf("blockStore open")
 	}
-	if blockStoreProvider, err := getBlockStoreProvider(s.path); err != nil {
+	if blockStoreProvider, err := getBlockStoreProvider(s.path, s.orderer); err != nil {
 		return err
 	} else {
 		s.blockStoreProvider = blockStoreProvider
 	}
+
 	return nil
 }
 
@@ -64,18 +68,18 @@ type ledger struct {
 
 func (s *blockStore) NewLedger(channelID string) (*ledger, error) {
 	hasLedger := false
-	ledgerIDs, err := s.ListChannels()
+	channelIDs, err := s.ListChannels()
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range ledgerIDs {
+	for _, id := range channelIDs {
 		if id == channelID {
 			hasLedger = true
 			break
 		}
 	}
 	if !hasLedger {
-		return nil, fmt.Errorf("missing channel: %s", channelID)
+		return nil, fmt.Errorf("missing channel: [%s] from [%s]", channelID, strings.Join(channelIDs, ","))
 	}
 
 	return &ledger{
@@ -214,28 +218,47 @@ func getFirstBlockNumberInLedger(info *common.BlockchainInfo) uint64 {
 	return snapshotInfo.GetLastBlockInSnapshot() + uint64(1)
 }
 
-// getBlockStoreProvider - Gets a default block store provider to access the peer's block store
-func getBlockStoreProvider(fsPath string) (*blkstorage.BlockStoreProvider, error) {
-	// Format path to block store
-	blockStorePath := kvledger.BlockStorePath(filepath.Join(fsPath, ledgersDataDirName))
+func getBlockStorePath(fsPath string, orderer bool) (string, error) {
+	var blockStorePath string
+	if orderer {
+		blockStorePath = filepath.Join(fsPath, ordererDataDirName)
+	} else {
+		blockStorePath = kvledger.BlockStorePath(filepath.Join(fsPath, ledgersDataDirName))
+	}
 	isEmpty, err := dirEmpty(blockStorePath)
+	if err != nil {
+		return "", fmt.Errorf("dirEmpty: %w", err)
+	}
+	if isEmpty {
+		return "", fmt.Errorf("path [%s] is empty", fsPath)
+	}
+	return blockStorePath, nil
+}
+
+// getBlockStoreProvider - Gets a default block store provider to access the peer's block store
+func getBlockStoreProvider(fsPath string, orderer bool) (*blkstorage.BlockStoreProvider, error) {
+	blockStorePath, err := getBlockStorePath(fsPath, orderer)
 	if err != nil {
 		return nil, err
 	}
-	if isEmpty {
-		return nil, fmt.Errorf("path [%s] is empty", fsPath)
+
+	attrs := []blkstorage.IndexableAttr{
+		blkstorage.IndexableAttrBlockNum,
 	}
-	// Default fields for block store provider
-	conf := blkstorage.NewConf(blockStorePath, 0)
-	indexConfig := &blkstorage.IndexConfig{
-		AttrsToIndex: []blkstorage.IndexableAttr{
-			blkstorage.IndexableAttrBlockNum,
+	if !orderer {
+		attrs = append(attrs, []blkstorage.IndexableAttr{
 			blkstorage.IndexableAttrBlockHash,
 			blkstorage.IndexableAttrTxID,
 			blkstorage.IndexableAttrBlockNumTranNum,
-		},
+		}...)
+	}
+
+	conf := blkstorage.NewConf(blockStorePath, -1)
+	indexConfig := &blkstorage.IndexConfig{
+		AttrsToIndex: attrs,
 	}
 	metricsProvider := &disabled.Provider{}
+
 	// Create new block store provider
 	blockStoreProvider, err := blkstorage.NewProvider(conf, indexConfig, metricsProvider)
 	if err != nil {
@@ -272,8 +295,8 @@ func (s *simpleBlockIterator) Next() (*CommonBlock, error) {
 	}
 }
 
-func RangeBlocks(ledgerDir string, channel string, start uint64, end uint64) (*simpleBlockIterator, error) {
-	blockStore, err := NewBlockStore(ledgerDir)
+func RangeBlocks(ledgerDir string, orderer bool, channel string, start uint64, end uint64) (*simpleBlockIterator, error) {
+	blockStore, err := NewBlockStore(ledgerDir, orderer)
 	if err != nil {
 		return nil, err
 	}
