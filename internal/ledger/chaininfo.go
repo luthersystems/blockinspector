@@ -32,8 +32,8 @@ func (s *CommonBlock) Write(w io.Writer) {
 	if s == nil {
 		return
 	}
-	if blk, err := processBlock(&s.Block); err != nil {
-		logrus.WithError(err).Error("process block")
+	if blk, err := NewBlock(&s.Block); err != nil {
+		logrus.WithError(err).Error("new block")
 		return
 	} else {
 		blk.Write(w)
@@ -42,10 +42,19 @@ func (s *CommonBlock) Write(w io.Writer) {
 
 // Block is a container for the transaction information.
 type Block struct {
-	hash         string
-	blockNum     uint64
-	transactions []*Transaction
-	size         int
+	hash          string
+	blockNum      uint64
+	transactions  []*Transaction
+	size          int
+	txValidations []txValidation
+}
+
+func (s *Block) GetValidation(txNum int) *txValidation {
+	if s == nil || txNum < 0 || txNum >= len(s.txValidations) {
+		missing := txValidation(-1)
+		return &missing
+	}
+	return &s.txValidations[txNum]
 }
 
 // formatWithTrailingDots truncates the input string to the specified length
@@ -79,49 +88,27 @@ func (b *Block) Write(w io.Writer) {
 	}
 }
 
-// Valid validates a block.
-func (b *Block) Valid() error {
+// GetHash returns block hash.
+func (b *Block) GetHash() string {
 	if b == nil {
-		return fmt.Errorf("missing block")
+		return ""
 	}
-	if b.BlockNum() <= 0 {
-		return fmt.Errorf("invalid block num [%d]", b.BlockNum())
-	}
-	if len(b.Transactions()) == 0 {
-		return fmt.Errorf("empty block [%d]", b.BlockNum())
-	}
-	for idx, tx := range b.Transactions() {
-		if err := tx.Valid(); err != nil {
-			return fmt.Errorf("block has invalid tx [%d] at [%d]: %w", b.BlockNum(), idx, err)
-		}
-	}
-	return nil
-}
-
-// NewBlock creates an immutable block object.
-func NewBlock(hash string, blockNum uint64, size int, transactions []*Transaction) *Block {
-	txsCopy := make([]*Transaction, len(transactions))
-	copy(txsCopy, transactions)
-	return &Block{
-		hash:         hash,
-		blockNum:     blockNum,
-		size:         size,
-		transactions: txsCopy,
-	}
-}
-
-// Hash returns block hash.
-func (b *Block) Hash() string {
 	return b.hash
 }
 
-// BlockNum returns the block number.
-func (b *Block) BlockNum() uint64 {
+// GetBlockNum returns the block number.
+func (b *Block) GetBlockNum() uint64 {
+	if b == nil {
+		return 0
+	}
 	return b.blockNum
 }
 
-// Transactions returns the transactions in the block.
-func (b *Block) Transactions() []*Transaction {
+// GetTransactions returns the transactions in the block.
+func (b *Block) GetTransactions() []*Transaction {
+	if b == nil {
+		return nil
+	}
 	txsCopy := make([]*Transaction, len(b.transactions))
 	copy(txsCopy, b.transactions)
 	return txsCopy
@@ -130,10 +117,33 @@ func (b *Block) Transactions() []*Transaction {
 // Transaction is a container for the transaction information exported
 // by QueryBlock.
 type Transaction struct {
+	num   int
+	block *Block
 	id    TransactionID
 	event *Event
 	code  *txValidation
 	size  int
+}
+
+func (t *Transaction) GetNumber() int {
+	if t == nil {
+		return -1
+	}
+	return t.num
+}
+
+func (t *Transaction) SetBlock(block *Block) {
+	if t == nil {
+		return
+	}
+	t.block = block
+}
+
+func (t *Transaction) GetBlock() *Block {
+	if t == nil {
+		return nil
+	}
+	return t.block
 }
 
 func (t *Transaction) Write(w io.Writer) {
@@ -144,8 +154,8 @@ func (t *Transaction) Write(w io.Writer) {
 	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
 	table.Append([]string{
-		formatWithTrailingDots(string(t.ID()), 6),
-		t.Code().Reason(),
+		formatWithTrailingDots(string(t.GetID()), 6),
+		t.GetBlock().GetValidation(t.GetNumber()).GetReason(),
 		t.GetEvent().GetChaincodeId(),
 		t.GetEvent().LutherDescription(),
 		fmt.Sprintf("%d", len(t.GetEvent().GetPayload())),
@@ -159,28 +169,24 @@ func (t *Transaction) Valid() error {
 	if t == nil {
 		return fmt.Errorf("missing tx")
 	}
-	if t.ID() == "" {
+	if t.GetID() == "" {
 		return fmt.Errorf("missing tx ID")
 	}
 	return nil
 }
 
-// NewTransaction creates an immutable transaction object.
-func NewTransaction(id TransactionID, event *Event, code *txValidation, size int) *Transaction {
-	return &Transaction{
-		id:    id,
-		event: event,
-		code:  code,
-		size:  size,
-	}
-}
-
 // ID is the transaction ID.
-func (t *Transaction) ID() TransactionID {
+func (t *Transaction) GetID() TransactionID {
+	if t == nil || t.id == "" {
+		return TransactionID("n/a")
+	}
 	return t.id
 }
 
-func (t *Transaction) Code() *txValidation {
+func (t *Transaction) GetCode() *txValidation {
+	if t == nil {
+		return nil
+	}
 	return t.code
 }
 
@@ -194,7 +200,7 @@ func (t *Transaction) GetEvent() *Event {
 
 type txValidation int32
 
-func (s *txValidation) Reason() string {
+func (s *txValidation) GetReason() string {
 	if s == nil || int32(*s) < 0 {
 		return "n/a"
 	}
@@ -205,59 +211,53 @@ func (s *txValidation) Reason() string {
 	}
 }
 
-func processBlock(blk *cb.Block) (*Block, error) {
+func NewBlock(blk *cb.Block) (*Block, error) {
 	if blk == nil {
-		return nil, fmt.Errorf("process block: nil")
+		return nil, fmt.Errorf("nil")
 	}
 	blockNum := blk.GetHeader().GetNumber()
 	transactionsIn := blk.GetData().GetData()
 	filterIn := blk.GetMetadata().Metadata[cb.BlockMetadataIndex_TRANSACTIONS_FILTER]
 	blockHash := blk.GetHeader().GetDataHash()
 	if blockHash == nil {
-		return nil, errors.New("process block: could not get data hash")
+		return nil, errors.New("no data hash")
 	}
 	blockHashHex := hex.EncodeToString(blockHash)
 
-	out := make([]*Transaction, 0, len(blk.GetData().GetData()))
-
-	for i, buf := range blk.GetData().GetData() {
-		code := txValidation(-1)
-		// NOTE: orderer chains do not have filters, so return -1
-		if len(transactionsIn) == len(filterIn) {
-			code = txValidation(int32(filterIn[i]))
-		}
-
-		txID, err := getTransactionID(buf)
-		if err != nil {
-			return nil, fmt.Errorf("process block: %w", err)
-		}
-
-		// an empty transaction ID is used by fabric to signify special
-		// data such as channel creation artifacts. here we ignore
-		// anything that isn't a regular transaction.
-		if len(txID) == 0 {
-			continue
-		}
-
-		event, err := getEvent(buf)
-		if err != nil {
-			return nil, fmt.Errorf("process block: %w", err)
-		}
-
-		size := len(buf)
-
-		out = append(out, NewTransaction(txID, event, &code, size))
-	}
+	txs := make([]*Transaction, 0, len(blk.GetData().GetData()))
 
 	size := proto.Size(blk)
-	processedBlock := NewBlock(blockHashHex, blockNum, size, out)
 
-	return processedBlock, nil
+	validations := make([]txValidation, 0, len(filterIn))
+
+	retBlock := &Block{
+		hash:     blockHashHex,
+		blockNum: blockNum,
+		size:     size,
+	}
+
+	for i, buf := range blk.GetData().GetData() {
+		if len(transactionsIn) == len(filterIn) {
+			validations = append(validations, txValidation(int32(filterIn[i])))
+		}
+
+		if tx, err := NewTransaction(buf); err != nil {
+			return nil, err
+		} else {
+			tx.SetBlock(retBlock)
+			txs = append(txs, tx)
+		}
+	}
+
+	retBlock.txValidations = validations
+	retBlock.transactions = txs
+
+	return retBlock, nil
 }
 
 type lutherEvent map[string]string
 
-func (s *lutherEvent) Name() string {
+func (s *lutherEvent) GetName() string {
 	if s == nil {
 		return ""
 	}
@@ -268,7 +268,7 @@ func (s *lutherEvent) Name() string {
 	return value
 }
 
-func (s *lutherEvent) RequestID() string {
+func (s *lutherEvent) GetRequestID() string {
 	if s == nil {
 		return ""
 	}
@@ -279,7 +279,7 @@ func (s *lutherEvent) RequestID() string {
 	return value
 }
 
-func (s *lutherEvent) Timestamp() string {
+func (s *lutherEvent) GetTimestamp() string {
 	if s == nil {
 		return ""
 	}
@@ -308,7 +308,7 @@ func (s *Event) LutherDescription() string {
 	if lutherEvent, err := newLutherEvent(s); err != nil {
 		return "<corrupt>"
 	} else {
-		return fmt.Sprintf("%s@%s [%s]", lutherEvent.Name(), lutherEvent.Timestamp(), lutherEvent.RequestID())
+		return fmt.Sprintf("%s@%s [%s]", lutherEvent.GetName(), lutherEvent.GetTimestamp(), lutherEvent.GetRequestID())
 	}
 }
 
@@ -323,27 +323,10 @@ func newLutherEvent(event *Event) (*lutherEvent, error) {
 	return lEvent, nil
 }
 
-func getEvent(data []byte) (*Event, error) {
-	envelope := &cb.Envelope{}
-	err := proto.Unmarshal(data, envelope)
-	if err != nil {
-		return nil, err
+func getEvent(tx *fabricpeer.Transaction) (*Event, error) {
+	if tx == nil {
+		return nil, nil
 	}
-
-	payload := &cb.Payload{}
-	err = proto.Unmarshal(envelope.GetPayload(), payload)
-	if err != nil {
-		return nil, err
-	}
-
-	// Thanks to: https://stackoverflow.com/questions/57571732/how-to-parse-protobuf-data-of-envelope-payload-data
-
-	tx := &fabricpeer.Transaction{}
-	err = proto.Unmarshal(payload.GetData(), tx)
-	if err != nil {
-		return nil, err
-	}
-
 	actions := tx.GetActions()
 	if len(actions) == 0 {
 		return nil, nil
@@ -352,20 +335,18 @@ func getEvent(data []byte) (*Event, error) {
 	action := actions[0]
 
 	chaincodeActionPayload := &fabricpeer.ChaincodeActionPayload{}
-	err = proto.Unmarshal(action.GetPayload(), chaincodeActionPayload)
-	if err != nil {
+	if err := proto.Unmarshal(action.GetPayload(), chaincodeActionPayload); err != nil {
 		return nil, err
 	}
 
 	proposalResponsePayload := &fabricpeer.ProposalResponsePayload{}
-	err = proto.Unmarshal(chaincodeActionPayload.GetAction().GetProposalResponsePayload(), proposalResponsePayload)
-	if err != nil {
-		return nil, err
+	if err := proto.Unmarshal(chaincodeActionPayload.GetAction().GetProposalResponsePayload(), proposalResponsePayload); err != nil {
+		logrus.WithError(err).Info("invalid proposal response")
+		return nil, nil
 	}
 
 	chaincodeAction := &fabricpeer.ChaincodeAction{}
-	err = proto.Unmarshal(proposalResponsePayload.GetExtension(), chaincodeAction)
-	if err != nil {
+	if err := proto.Unmarshal(proposalResponsePayload.GetExtension(), chaincodeAction); err != nil {
 		return nil, err
 	}
 
@@ -374,32 +355,49 @@ func getEvent(data []byte) (*Event, error) {
 	}
 
 	event := &fabricpeer.ChaincodeEvent{}
-	err = proto.Unmarshal(chaincodeAction.GetEvents(), event)
-	if err != nil {
+	if err := proto.Unmarshal(chaincodeAction.GetEvents(), event); err != nil {
 		return nil, err
 	}
 
 	return &Event{*event}, nil
 }
 
-func getTransactionID(data []byte) (TransactionID, error) {
+// NewTransaction creates an immutable transaction object.
+func NewTransaction(envelopeBytes []byte) (*Transaction, error) {
+	size := len(envelopeBytes)
+	if size == 0 {
+		return nil, fmt.Errorf("empty envelope")
+	}
+	retTx := &Transaction{
+		size: size,
+	}
 	envelope := &cb.Envelope{}
-	err := proto.Unmarshal(data, envelope)
-	if err != nil {
-		return "", err
+	if err := proto.Unmarshal(envelopeBytes, envelope); err != nil {
+		return nil, err
 	}
 
 	payload := &cb.Payload{}
-	err = proto.Unmarshal(envelope.GetPayload(), payload)
-	if err != nil {
-		return "", err
+	if err := proto.Unmarshal(envelope.GetPayload(), payload); err != nil {
+		return nil, err
 	}
 
 	channelheader := &cb.ChannelHeader{}
-	err = proto.Unmarshal(payload.GetHeader().GetChannelHeader(), channelheader)
-	if err != nil {
-		return "", err
+	if err := proto.Unmarshal(payload.GetHeader().GetChannelHeader(), channelheader); err != nil {
+		return nil, err
 	}
 
-	return TransactionID(channelheader.GetTxId()), nil
+	retTx.id = TransactionID(channelheader.GetTxId())
+
+	tx := &fabricpeer.Transaction{}
+	if err := proto.Unmarshal(payload.GetData(), tx); err != nil {
+		return nil, err
+	}
+
+	if event, err := getEvent(tx); err != nil {
+		return nil, err
+	} else {
+		retTx.event = event
+	}
+
+	return retTx, nil
 }
