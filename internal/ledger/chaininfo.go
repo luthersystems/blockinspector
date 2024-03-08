@@ -48,6 +48,15 @@ type Block struct {
 	size         int
 }
 
+// formatWithTrailingDots truncates the input string to the specified length
+// and adds trailing dots if the original string was longer.
+func formatWithTrailingDots(input string, length int) string {
+	if len(input) > length {
+		return fmt.Sprintf("%.*s...", length, input)
+	}
+	return input
+}
+
 func (b *Block) Write(w io.Writer) {
 	if w == nil {
 		return
@@ -60,7 +69,7 @@ func (b *Block) Write(w io.Writer) {
 	table.SetHeader([]string{"Block Num", "Hash", "Num Txs", "Size (bytes)"})
 	table.Append([]string{
 		fmt.Sprintf("%d", b.blockNum),
-		b.hash,
+		formatWithTrailingDots(b.hash, 6),
 		fmt.Sprintf("%d", len(b.transactions)),
 		fmt.Sprintf("%d", b.size),
 	})
@@ -121,11 +130,10 @@ func (b *Block) Transactions() []*Transaction {
 // Transaction is a container for the transaction information exported
 // by QueryBlock.
 type Transaction struct {
-	id             TransactionID
-	reason         string
-	event          *Event
-	validationCode int32
-	size           int
+	id    TransactionID
+	event *Event
+	code  *txValidation
+	size  int
 }
 
 func (t *Transaction) Write(w io.Writer) {
@@ -136,10 +144,10 @@ func (t *Transaction) Write(w io.Writer) {
 	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
 	table.Append([]string{
-		string(t.ID()),
-		t.Reason(),
+		formatWithTrailingDots(string(t.ID()), 6),
+		t.Code().Reason(),
 		t.GetEvent().GetChaincodeId(),
-		t.GetEvent().LutherEndpoint(),
+		t.GetEvent().LutherDescription(),
 		fmt.Sprintf("%d", len(t.GetEvent().GetPayload())),
 		fmt.Sprintf("%d", t.size),
 	})
@@ -158,13 +166,12 @@ func (t *Transaction) Valid() error {
 }
 
 // NewTransaction creates an immutable transaction object.
-func NewTransaction(id TransactionID, reason string, event *Event, validationCode int32, size int) *Transaction {
+func NewTransaction(id TransactionID, event *Event, code *txValidation, size int) *Transaction {
 	return &Transaction{
-		id:             id,
-		reason:         reason,
-		event:          event,
-		validationCode: validationCode,
-		size:           size,
+		id:    id,
+		event: event,
+		code:  code,
+		size:  size,
 	}
 }
 
@@ -173,14 +180,8 @@ func (t *Transaction) ID() TransactionID {
 	return t.id
 }
 
-// Reason is an english description of the transaction event.
-func (t *Transaction) Reason() string {
-	return t.reason
-}
-
-// ValidationCode is the status code for the transaction.
-func (t *Transaction) ValidationCode() int32 {
-	return t.validationCode
+func (t *Transaction) Code() *txValidation {
+	return t.code
 }
 
 // GetEvent is the transaction event data.
@@ -189,6 +190,19 @@ func (t *Transaction) GetEvent() *Event {
 		return &Event{}
 	}
 	return t.event
+}
+
+type txValidation int32
+
+func (s *txValidation) Reason() string {
+	if s == nil || int32(*s) < 0 {
+		return "n/a"
+	}
+	if reason, ok := fabricpeer.TxValidationCode_name[int32(*s)]; !ok {
+		return fmt.Sprintf("invalid code [%d]", s)
+	} else {
+		return reason
+	}
 }
 
 func processBlock(blk *cb.Block) (*Block, error) {
@@ -207,16 +221,10 @@ func processBlock(blk *cb.Block) (*Block, error) {
 	out := make([]*Transaction, 0, len(blk.GetData().GetData()))
 
 	for i, buf := range blk.GetData().GetData() {
-		validationCode := int32(-1)
-		reason := ""
+		code := txValidation(-1)
 		// NOTE: orderer chains do not have filters, so return -1
 		if len(transactionsIn) == len(filterIn) {
-			validationCode = int32(filterIn[i])
-			var ok bool
-			reason, ok = fabricpeer.TxValidationCode_name[validationCode]
-			if !ok {
-				return nil, fmt.Errorf("process block: invalid validation code [%d]", validationCode)
-			}
+			code = txValidation(int32(filterIn[i]))
 		}
 
 		txID, err := getTransactionID(buf)
@@ -238,7 +246,7 @@ func processBlock(blk *cb.Block) (*Block, error) {
 
 		size := len(buf)
 
-		out = append(out, NewTransaction(txID, reason, event, validationCode, size))
+		out = append(out, NewTransaction(txID, event, &code, size))
 	}
 
 	size := proto.Size(blk)
@@ -293,14 +301,14 @@ func (s *Event) IsLutherEvent() bool {
 	return s.GetEventName() == LutherEventKey
 }
 
-func (s *Event) LutherEndpoint() string {
+func (s *Event) LutherDescription() string {
 	if !s.IsLutherEvent() {
 		return "<none>"
 	}
 	if lutherEvent, err := newLutherEvent(s); err != nil {
 		return "<corrupt>"
 	} else {
-		return lutherEvent.Name()
+		return fmt.Sprintf("%s@%s [%s]", lutherEvent.Name(), lutherEvent.Timestamp(), lutherEvent.RequestID())
 	}
 }
 
