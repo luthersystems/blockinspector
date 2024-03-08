@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +16,10 @@ import (
 )
 
 const (
-	LutherEventKey = "luther"
+	LutherEventKey         = "luther"
+	LutherEventName        = "txEventName"
+	LutherEventRequestID   = "txRequestID"
+	LutherEventTxTimestamp = "txTimestamp"
 )
 
 type TransactionID string
@@ -119,8 +123,7 @@ func (b *Block) Transactions() []*Transaction {
 type Transaction struct {
 	id             TransactionID
 	reason         string
-	event          []byte
-	chaincodeID    string
+	event          *Event
 	validationCode int32
 	size           int
 }
@@ -131,17 +134,13 @@ func (t *Transaction) Write(w io.Writer) {
 		return
 	}
 	table := tablewriter.NewWriter(w)
-	table.SetHeader([]string{"ID", "Reason", "Chaincode ID", "Validation Code", "Event", "Size (bytes)"})
-	eventStr := "<none>"
-	if len(t.Event()) > 0 {
-		eventStr = hex.EncodeToString(t.Event())
-	}
+	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
 	table.Append([]string{
 		string(t.ID()),
 		t.Reason(),
-		t.ChaincodeID(),
-		fmt.Sprintf("%d", t.ValidationCode()),
-		eventStr,
+		t.GetEvent().GetChaincodeId(),
+		t.GetEvent().LutherEndpoint(),
+		fmt.Sprintf("%d", len(t.GetEvent().GetPayload())),
 		fmt.Sprintf("%d", t.size),
 	})
 	table.Render() // Send output
@@ -159,13 +158,11 @@ func (t *Transaction) Valid() error {
 }
 
 // NewTransaction creates an immutable transaction object.
-func NewTransaction(id TransactionID, reason string, event []byte, chaincodeID string, validationCode int32, size int) *Transaction {
-	eventCopy := make([]byte, len(event))
-	copy(eventCopy, event)
+func NewTransaction(id TransactionID, reason string, event *Event, validationCode int32, size int) *Transaction {
 	return &Transaction{
 		id:             id,
 		reason:         reason,
-		event:          eventCopy,
+		event:          event,
 		validationCode: validationCode,
 		size:           size,
 	}
@@ -181,24 +178,17 @@ func (t *Transaction) Reason() string {
 	return t.reason
 }
 
-// ChaincodeID is the chaincode ID for the transaction.
-func (t *Transaction) ChaincodeID() string {
-	return t.chaincodeID
-}
-
 // ValidationCode is the status code for the transaction.
 func (t *Transaction) ValidationCode() int32 {
 	return t.validationCode
 }
 
-// Event is the transaction event data.
-func (t *Transaction) Event() []byte {
-	if len(t.event) == 0 {
-		return nil
+// GetEvent is the transaction event data.
+func (t *Transaction) GetEvent() *Event {
+	if t == nil || t.event == nil {
+		return &Event{}
 	}
-	eventCopy := make([]byte, len(t.event))
-	copy(eventCopy, t.event)
-	return eventCopy
+	return t.event
 }
 
 func processBlock(blk *cb.Block) (*Block, error) {
@@ -241,14 +231,14 @@ func processBlock(blk *cb.Block) (*Block, error) {
 			continue
 		}
 
-		event, ccID, err := getEvent(buf)
+		event, err := getEvent(buf)
 		if err != nil {
 			return nil, fmt.Errorf("process block: %w", err)
 		}
 
 		size := len(buf)
 
-		out = append(out, NewTransaction(txID, reason, event, ccID, validationCode, size))
+		out = append(out, NewTransaction(txID, reason, event, validationCode, size))
 	}
 
 	size := proto.Size(blk)
@@ -257,17 +247,85 @@ func processBlock(blk *cb.Block) (*Block, error) {
 	return processedBlock, nil
 }
 
-func getEvent(data []byte) ([]byte, string, error) {
+type lutherEvent map[string]string
+
+func (s *lutherEvent) Name() string {
+	if s == nil {
+		return ""
+	}
+	value, exists := (*s)[LutherEventName]
+	if !exists {
+		return ""
+	}
+	return value
+}
+
+func (s *lutherEvent) RequestID() string {
+	if s == nil {
+		return ""
+	}
+	value, exists := (*s)[LutherEventRequestID]
+	if !exists {
+		return ""
+	}
+	return value
+}
+
+func (s *lutherEvent) Timestamp() string {
+	if s == nil {
+		return ""
+	}
+	value, exists := (*s)[LutherEventTxTimestamp]
+	if !exists {
+		return ""
+	}
+	return value
+}
+
+type Event struct {
+	fabricpeer.ChaincodeEvent
+}
+
+func (s *Event) IsLutherEvent() bool {
+	if s == nil {
+		return false
+	}
+	return s.GetEventName() == LutherEventKey
+}
+
+func (s *Event) LutherEndpoint() string {
+	if !s.IsLutherEvent() {
+		return "<none>"
+	}
+	if lutherEvent, err := newLutherEvent(s); err != nil {
+		return "<corrupt>"
+	} else {
+		return lutherEvent.Name()
+	}
+}
+
+func newLutherEvent(event *Event) (*lutherEvent, error) {
+	if event.GetEventName() != LutherEventKey {
+		return nil, fmt.Errorf("non-luther event")
+	}
+	lEvent := &lutherEvent{}
+	if err := json.Unmarshal(event.GetPayload(), lEvent); err != nil {
+		return nil, err
+	}
+	return lEvent, nil
+}
+
+func getEvent(data []byte) (*Event, error) {
 	envelope := &cb.Envelope{}
 	err := proto.Unmarshal(data, envelope)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	payload := &cb.Payload{}
 	err = proto.Unmarshal(envelope.GetPayload(), payload)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	// Thanks to: https://stackoverflow.com/questions/57571732/how-to-parse-protobuf-data-of-envelope-payload-data
@@ -275,12 +333,12 @@ func getEvent(data []byte) ([]byte, string, error) {
 	tx := &fabricpeer.Transaction{}
 	err = proto.Unmarshal(payload.GetData(), tx)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	actions := tx.GetActions()
 	if len(actions) == 0 {
-		return nil, "", nil
+		return nil, nil
 	}
 
 	action := actions[0]
@@ -288,37 +346,32 @@ func getEvent(data []byte) ([]byte, string, error) {
 	chaincodeActionPayload := &fabricpeer.ChaincodeActionPayload{}
 	err = proto.Unmarshal(action.GetPayload(), chaincodeActionPayload)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	proposalResponsePayload := &fabricpeer.ProposalResponsePayload{}
 	err = proto.Unmarshal(chaincodeActionPayload.GetAction().GetProposalResponsePayload(), proposalResponsePayload)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	chaincodeAction := &fabricpeer.ChaincodeAction{}
 	err = proto.Unmarshal(proposalResponsePayload.GetExtension(), chaincodeAction)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	if len(chaincodeAction.GetEvents()) == 0 {
-		return nil, "", nil
+		return nil, nil
 	}
 
 	event := &fabricpeer.ChaincodeEvent{}
 	err = proto.Unmarshal(chaincodeAction.GetEvents(), event)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	if event.GetEventName() != LutherEventKey {
-		// unrecognized event
-		return nil, event.GetChaincodeId(), nil
-	}
-
-	return event.GetPayload(), event.GetChaincodeId(), nil
+	return &Event{*event}, nil
 }
 
 func getTransactionID(data []byte) (TransactionID, error) {
