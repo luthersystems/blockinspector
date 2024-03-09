@@ -44,10 +44,10 @@ func (s *CommonBlock) Write(w io.Writer) {
 // Block is a container for the transaction information.
 type Block struct {
 	hash          string
-	blockNum      uint64
 	transactions  []*Transaction
-	size          int
 	txValidations []TxValidation
+	blockNum      uint64
+	size          int
 }
 
 func (s *Block) GetValidation(txNum int) *TxValidation {
@@ -77,6 +77,7 @@ func (b *Block) Write(w io.Writer) {
 	}
 	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"Block Num", "Hash", "Num Txs", "Size (bytes)"})
+	table.SetCaption(true, "Block Summary")
 	table.Append([]string{
 		fmt.Sprintf("%d", b.blockNum),
 		formatWithTrailingDots(b.hash, 6),
@@ -84,6 +85,7 @@ func (b *Block) Write(w io.Writer) {
 		fmt.Sprintf("%d", b.size),
 	})
 	table.Render() // Send output
+	fmt.Fprintln(w)
 	for i := range b.transactions {
 		b.WriteTx(i, w)
 	}
@@ -99,6 +101,7 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 	t := b.transactions[i]
 	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
+	table.SetCaption(true, fmt.Sprintf("Transactions (block=[%d])", b.blockNum))
 	details := t.GetDetails()
 	event := details.GetEvent()
 	table.Append([]string{
@@ -110,6 +113,7 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 		fmt.Sprintf("%d", t.GetSize()),
 	})
 	table.Render()
+	fmt.Fprintln(w)
 
 	for _, nsRWSet := range details.GetNamespaceReadWriteSet() {
 		if nsRWSet.GetNamespace() == "_lifecycle" && skipLifecycleRWSet {
@@ -118,7 +122,7 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 		rwSet := nsRWSet.GetReadWriteSet()
 
 		table = tablewriter.NewWriter(w)
-		table.SetCaption(true, fmt.Sprintf("Read Set [%s]", nsRWSet.GetNamespace()))
+		table.SetCaption(true, fmt.Sprintf("Read Set (namespace=[%s], txid=[%s])", nsRWSet.GetNamespace(), t.GetID()))
 		table.SetHeader([]string{"Key", "Version"})
 		for _, record := range rwSet.GetReadSet() {
 			table.Append([]string{
@@ -127,6 +131,7 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 			})
 		}
 		table.Render()
+		fmt.Fprintln(w)
 
 		table = tablewriter.NewWriter(w)
 		table.SetCaption(true, fmt.Sprintf("Write Set [%s]", nsRWSet.GetNamespace()))
@@ -137,8 +142,9 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 				fmt.Sprintf("%d", len(record.GetVal())),
 			})
 		}
-		table.Render()
 
+		table.Render()
+		fmt.Fprintln(w)
 	}
 }
 
@@ -171,10 +177,10 @@ func (b *Block) GetTransactions() []*Transaction {
 // Transaction is a container for the transaction information exported
 // by QueryBlock.
 type Transaction struct {
-	num     int
-	id      TransactionID
-	size    int
 	details *TransactionDetails
+	id      TransactionID
+	num     int
+	size    int
 }
 
 func (t *Transaction) GetNumber() int {
@@ -354,8 +360,8 @@ func (s *Version) String() string {
 }
 
 type RSetRecord struct {
-	Key     string
 	Version *Version
+	Key     string
 }
 
 func (s *RSetRecord) GetKey() string {
@@ -411,8 +417,8 @@ func (s *RWSet) GetReadSet() []*RSetRecord {
 }
 
 type NSRWSet struct {
-	Namespace string
 	RWSet     *RWSet
+	Namespace string
 }
 
 func (s *NSRWSet) GetNamespace() string {
