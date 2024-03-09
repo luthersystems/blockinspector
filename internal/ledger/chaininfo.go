@@ -83,9 +83,30 @@ func (b *Block) Write(w io.Writer) {
 		fmt.Sprintf("%d", b.size),
 	})
 	table.Render() // Send output
-	for _, tx := range b.transactions {
-		tx.Write(w)
+	for i := range b.transactions {
+		b.WriteTx(i, w)
 	}
+}
+
+func (b *Block) WriteTx(i int, w io.Writer) {
+	if w == nil {
+		return
+	}
+	if i < 0 || i >= len(b.transactions) {
+		return
+	}
+	t := b.transactions[i]
+	table := tablewriter.NewWriter(w)
+	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
+	table.Append([]string{
+		formatWithTrailingDots(string(t.GetID()), 6),
+		b.GetValidation(i).GetReason(),
+		t.GetEvent().GetChaincodeId(),
+		t.GetEvent().LutherDescription(),
+		fmt.Sprintf("%d", len(t.GetEvent().GetPayload())),
+		fmt.Sprintf("%d", t.GetSize()),
+	})
+	table.Render() // Send output
 }
 
 // GetHash returns block hash.
@@ -132,55 +153,19 @@ func (t *Transaction) GetNumber() int {
 	return t.num
 }
 
-func (t *Transaction) SetBlock(block *Block) {
-	if t == nil {
-		return
-	}
-	t.block = block
-}
-
-func (t *Transaction) GetBlock() *Block {
-	if t == nil {
-		return nil
-	}
-	return t.block
-}
-
-func (t *Transaction) Write(w io.Writer) {
-	if t == nil {
-		fmt.Fprint(w, "empty block")
-		return
-	}
-	table := tablewriter.NewWriter(w)
-	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
-	table.Append([]string{
-		formatWithTrailingDots(string(t.GetID()), 6),
-		t.GetBlock().GetValidation(t.GetNumber()).GetReason(),
-		t.GetEvent().GetChaincodeId(),
-		t.GetEvent().LutherDescription(),
-		fmt.Sprintf("%d", len(t.GetEvent().GetPayload())),
-		fmt.Sprintf("%d", t.size),
-	})
-	table.Render() // Send output
-}
-
-// Valid validates a transaction.
-func (t *Transaction) Valid() error {
-	if t == nil {
-		return fmt.Errorf("missing tx")
-	}
-	if t.GetID() == "" {
-		return fmt.Errorf("missing tx ID")
-	}
-	return nil
-}
-
 // ID is the transaction ID.
 func (t *Transaction) GetID() TransactionID {
 	if t == nil || t.id == "" {
 		return TransactionID("n/a")
 	}
 	return t.id
+}
+
+func (t *Transaction) GetSize() int {
+	if t == nil {
+		return 0
+	}
+	return t.size
 }
 
 func (t *Transaction) GetCode() *txValidation {
@@ -244,7 +229,6 @@ func NewBlock(blk *cb.Block) (*Block, error) {
 		if tx, err := NewTransaction(buf); err != nil {
 			return nil, err
 		} else {
-			tx.SetBlock(retBlock)
 			txs = append(txs, tx)
 		}
 	}
