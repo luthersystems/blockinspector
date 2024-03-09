@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/golang/protobuf/proto" //nolint SA1019 hlf does not support latest protobuf
-	"github.com/hyperledger/fabric-protos-go/common"
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	fabricpeer "github.com/hyperledger/fabric-protos-go/peer"
+	"github.com/hyperledger/fabric/protoutil"
 	"github.com/olekukonko/tablewriter"
 	"github.com/sirupsen/logrus"
 )
@@ -22,10 +21,12 @@ const (
 	LutherEventTxTimestamp = "txTimestamp"
 )
 
+var skipLifecycleRWSet = true
+
 type TransactionID string
 
 type CommonBlock struct {
-	common.Block
+	cb.Block
 }
 
 func (s *CommonBlock) Write(w io.Writer) {
@@ -46,12 +47,12 @@ type Block struct {
 	blockNum      uint64
 	transactions  []*Transaction
 	size          int
-	txValidations []txValidation
+	txValidations []TxValidation
 }
 
-func (s *Block) GetValidation(txNum int) *txValidation {
+func (s *Block) GetValidation(txNum int) *TxValidation {
 	if s == nil || txNum < 0 || txNum >= len(s.txValidations) {
-		missing := txValidation(-1)
+		missing := TxValidation(-1)
 		return &missing
 	}
 	return &s.txValidations[txNum]
@@ -98,15 +99,47 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 	t := b.transactions[i]
 	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
+	details := t.GetDetails()
+	event := details.GetEvent()
 	table.Append([]string{
 		formatWithTrailingDots(string(t.GetID()), 6),
 		b.GetValidation(i).GetReason(),
-		t.GetEvent().GetChaincodeId(),
-		t.GetEvent().LutherDescription(),
-		fmt.Sprintf("%d", len(t.GetEvent().GetPayload())),
+		event.GetChaincodeId(),
+		event.LutherDescription(),
+		fmt.Sprintf("%d", len(event.GetPayload())),
 		fmt.Sprintf("%d", t.GetSize()),
 	})
-	table.Render() // Send output
+	table.Render()
+
+	for _, nsRWSet := range details.GetNamespaceReadWriteSet() {
+		if nsRWSet.GetNamespace() == "_lifecycle" && skipLifecycleRWSet {
+			continue
+		}
+		rwSet := nsRWSet.GetReadWriteSet()
+
+		table = tablewriter.NewWriter(w)
+		table.SetCaption(true, fmt.Sprintf("Read Set [%s]", nsRWSet.GetNamespace()))
+		table.SetHeader([]string{"Key", "Version"})
+		for _, record := range rwSet.GetReadSet() {
+			table.Append([]string{
+				record.GetKey(),
+				record.GetVersion().String(),
+			})
+		}
+		table.Render()
+
+		table = tablewriter.NewWriter(w)
+		table.SetCaption(true, fmt.Sprintf("Write Set [%s]", nsRWSet.GetNamespace()))
+		table.SetHeader([]string{"Key", "Val (size)"})
+		for _, record := range rwSet.GetWriteSet() {
+			table.Append([]string{
+				record.GetKey(),
+				fmt.Sprintf("%d", len(record.GetVal())),
+			})
+		}
+		table.Render()
+
+	}
 }
 
 // GetHash returns block hash.
@@ -138,12 +171,10 @@ func (b *Block) GetTransactions() []*Transaction {
 // Transaction is a container for the transaction information exported
 // by QueryBlock.
 type Transaction struct {
-	num   int
-	block *Block
-	id    TransactionID
-	event *Event
-	code  *txValidation
-	size  int
+	num     int
+	id      TransactionID
+	size    int
+	details *TransactionDetails
 }
 
 func (t *Transaction) GetNumber() int {
@@ -168,24 +199,16 @@ func (t *Transaction) GetSize() int {
 	return t.size
 }
 
-func (t *Transaction) GetCode() *txValidation {
+func (t *Transaction) GetDetails() *TransactionDetails {
 	if t == nil {
 		return nil
 	}
-	return t.code
+	return t.details
 }
 
-// GetEvent is the transaction event data.
-func (t *Transaction) GetEvent() *Event {
-	if t == nil || t.event == nil {
-		return &Event{}
-	}
-	return t.event
-}
+type TxValidation int32
 
-type txValidation int32
-
-func (s *txValidation) GetReason() string {
+func (s *TxValidation) GetReason() string {
 	if s == nil || int32(*s) < 0 {
 		return "n/a"
 	}
@@ -211,9 +234,9 @@ func NewBlock(blk *cb.Block) (*Block, error) {
 
 	txs := make([]*Transaction, 0, len(blk.GetData().GetData()))
 
-	size := proto.Size(blk)
+	size := blk.XXX_Size() // NOTE: this isn't great, but it's better than importing the deprecated proto pkg
 
-	validations := make([]txValidation, 0, len(filterIn))
+	validations := make([]TxValidation, 0, len(filterIn))
 
 	retBlock := &Block{
 		hash:     blockHashHex,
@@ -223,7 +246,7 @@ func NewBlock(blk *cb.Block) (*Block, error) {
 
 	for i, buf := range blk.GetData().GetData() {
 		if len(transactionsIn) == len(filterIn) {
-			validations = append(validations, txValidation(int32(filterIn[i])))
+			validations = append(validations, TxValidation(int32(filterIn[i])))
 		}
 
 		if tx, err := NewTransaction(buf); err != nil {
@@ -275,7 +298,21 @@ func (s *lutherEvent) GetTimestamp() string {
 }
 
 type Event struct {
-	fabricpeer.ChaincodeEvent
+	*fabricpeer.ChaincodeEvent
+}
+
+func (s *Event) GetPayload() []byte {
+	if s == nil {
+		return nil
+	}
+	return s.Payload
+}
+
+func (s *Event) GetChaincodeId() string {
+	if s == nil {
+		return ""
+	}
+	return s.ChaincodeId
 }
 
 func (s *Event) IsLutherEvent() bool {
@@ -307,10 +344,144 @@ func newLutherEvent(event *Event) (*lutherEvent, error) {
 	return lEvent, nil
 }
 
-func getEvent(tx *fabricpeer.Transaction) (*Event, error) {
-	if tx == nil {
+type Version struct {
+	BlockNum uint64
+	TxNum    uint64
+}
+
+func (s *Version) String() string {
+	return fmt.Sprintf("(%d:%d)", s.BlockNum, s.TxNum)
+}
+
+type RSetRecord struct {
+	Key     string
+	Version *Version
+}
+
+func (s *RSetRecord) GetKey() string {
+	if s == nil {
+		return ""
+	}
+	return s.Key
+}
+
+func (s *RSetRecord) GetVersion() *Version {
+	if s == nil {
+		return nil
+	}
+	return s.Version
+}
+
+type WSetRecord struct {
+	Key string
+	Val []byte
+}
+
+func (s *WSetRecord) GetKey() string {
+	if s == nil {
+		return ""
+	}
+	return s.Key
+}
+
+func (s *WSetRecord) GetVal() []byte {
+	if s == nil {
+		return nil
+	}
+	return s.Val
+}
+
+type RWSet struct {
+	ReadSet  []*RSetRecord
+	WriteSet []*WSetRecord
+}
+
+func (s *RWSet) GetWriteSet() []*WSetRecord {
+	if s == nil {
+		return nil
+	}
+	return s.WriteSet
+}
+
+func (s *RWSet) GetReadSet() []*RSetRecord {
+	if s == nil {
+		return nil
+	}
+	return s.ReadSet
+}
+
+type NSRWSet struct {
+	Namespace string
+	RWSet     *RWSet
+}
+
+func (s *NSRWSet) GetNamespace() string {
+	if s == nil {
+		return ""
+	}
+	return s.Namespace
+}
+
+func (s *NSRWSet) GetReadWriteSet() *RWSet {
+	if s == nil {
+		return nil
+	}
+	return s.RWSet
+}
+
+func getNSRWSets(results []byte) ([]*NSRWSet, error) {
+	if len(results) == 0 {
 		return nil, nil
 	}
+	txRwSet, err := protoutil.UnmarshalTxReadWriteSet(results)
+	if err != nil {
+		return nil, err
+	}
+
+	nsRWSets := make([]*NSRWSet, 0, len(txRwSet.GetNsRwset()))
+
+	for _, txrw := range txRwSet.GetNsRwset() {
+		rwSet, err := protoutil.UnmarshalKVRWSet(txrw.GetRwset())
+		if err != nil {
+			return nil, err
+		}
+		rwSetExtracted := &RWSet{
+			ReadSet:  []*RSetRecord{},
+			WriteSet: []*WSetRecord{},
+		}
+		for _, read := range rwSet.Reads {
+			rwSetExtracted.ReadSet = append(rwSetExtracted.ReadSet, &RSetRecord{
+				Key: read.GetKey(),
+				Version: &Version{
+					BlockNum: read.GetVersion().GetBlockNum(),
+					TxNum:    read.GetVersion().GetTxNum(),
+				},
+			})
+		}
+		for _, write := range rwSet.Writes {
+			rwSetExtracted.WriteSet = append(rwSetExtracted.WriteSet, &WSetRecord{
+				Key: write.GetKey(),
+				Val: write.GetValue(),
+			})
+		}
+		nsRWSets = append(nsRWSets, &NSRWSet{
+			Namespace: txrw.GetNamespace(),
+			RWSet:     rwSetExtracted,
+		})
+	}
+
+	return nsRWSets, nil
+}
+
+func getAction(txBytes []byte) (*fabricpeer.ChaincodeAction, error) {
+	if len(txBytes) == 0 {
+		return nil, nil
+	}
+	tx, err := protoutil.UnmarshalTransaction(txBytes)
+	if err != nil {
+		return nil, err
+	}
+
 	actions := tx.GetActions()
 	if len(actions) == 0 {
 		return nil, nil
@@ -318,69 +489,128 @@ func getEvent(tx *fabricpeer.Transaction) (*Event, error) {
 
 	action := actions[0]
 
-	chaincodeActionPayload := &fabricpeer.ChaincodeActionPayload{}
-	if err := proto.Unmarshal(action.GetPayload(), chaincodeActionPayload); err != nil {
+	chaincodeActionPayload, err := protoutil.UnmarshalChaincodeActionPayload(action.GetPayload())
+	if err != nil {
 		return nil, err
 	}
 
-	proposalResponsePayload := &fabricpeer.ProposalResponsePayload{}
-	if err := proto.Unmarshal(chaincodeActionPayload.GetAction().GetProposalResponsePayload(), proposalResponsePayload); err != nil {
+	proposalResponse, err := protoutil.UnmarshalProposalResponsePayload(chaincodeActionPayload.GetAction().GetProposalResponsePayload())
+	if err != nil {
 		logrus.WithError(err).Info("invalid proposal response")
 		return nil, nil
 	}
 
-	chaincodeAction := &fabricpeer.ChaincodeAction{}
-	if err := proto.Unmarshal(proposalResponsePayload.GetExtension(), chaincodeAction); err != nil {
+	chaincodeAction, err := protoutil.UnmarshalChaincodeAction(proposalResponse.GetExtension())
+	if err != nil {
 		return nil, err
 	}
 
-	if len(chaincodeAction.GetEvents()) == 0 {
+	return chaincodeAction, nil
+}
+
+func getEvent(eventBytes []byte) (*Event, error) {
+	if len(eventBytes) == 0 {
 		return nil, nil
 	}
-
-	event := &fabricpeer.ChaincodeEvent{}
-	if err := proto.Unmarshal(chaincodeAction.GetEvents(), event); err != nil {
+	event, err := protoutil.UnmarshalChaincodeEvents(eventBytes)
+	if err != nil {
 		return nil, err
 	}
 
-	return &Event{*event}, nil
+	return &Event{event}, nil
+}
+
+type TransactionDetails struct {
+	event    *Event
+	nsRWSets []*NSRWSet
+}
+
+func (s *TransactionDetails) GetEvent() *Event {
+	if s == nil {
+		return nil
+	}
+	return s.event
+}
+
+func (s *TransactionDetails) GetNamespaceReadWriteSet() []*NSRWSet {
+	if s == nil {
+		return nil
+	}
+	return s.nsRWSets
+}
+
+func NewTransactionDetails(txBytes []byte) (*TransactionDetails, error) {
+	chaincodeAction, err := getAction(txBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	details := &TransactionDetails{}
+
+	if event, err := getEvent(chaincodeAction.GetEvents()); err != nil {
+		return nil, err
+	} else {
+		details.event = event
+	}
+
+	if nsRWSets, err := getNSRWSets(chaincodeAction.GetResults()); err != nil {
+		return nil, err
+	} else {
+		details.nsRWSets = nsRWSets
+	}
+
+	return details, nil
+}
+
+func getPayload(envelopeBytes []byte) (*cb.Payload, error) {
+	if len(envelopeBytes) == 0 {
+		return nil, fmt.Errorf("empty envelope")
+	}
+
+	envelope, err := protoutil.UnmarshalEnvelope(envelopeBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	payload, err := protoutil.UnmarshalPayload(envelope.GetPayload())
+	if err != nil {
+		return nil, err
+	}
+
+	return payload, nil
+}
+
+func getTransactionID(chanHeaderBytes []byte) (TransactionID, error) {
+	channelheader, err := protoutil.UnmarshalChannelHeader(chanHeaderBytes)
+	if err != nil {
+		return "", err
+	} else {
+		return TransactionID(channelheader.GetTxId()), nil
+	}
 }
 
 // NewTransaction creates an immutable transaction object.
 func NewTransaction(envelopeBytes []byte) (*Transaction, error) {
-	size := len(envelopeBytes)
-	if size == 0 {
-		return nil, fmt.Errorf("empty envelope")
-	}
 	retTx := &Transaction{
-		size: size,
+		size: len(envelopeBytes),
 	}
-	envelope := &cb.Envelope{}
-	if err := proto.Unmarshal(envelopeBytes, envelope); err != nil {
+
+	payload, err := getPayload(envelopeBytes)
+	if err != nil {
 		return nil, err
 	}
 
-	payload := &cb.Payload{}
-	if err := proto.Unmarshal(envelope.GetPayload(), payload); err != nil {
+	txID, err := getTransactionID(payload.GetHeader().GetChannelHeader())
+	if err != nil {
 		return nil, err
 	}
 
-	channelheader := &cb.ChannelHeader{}
-	if err := proto.Unmarshal(payload.GetHeader().GetChannelHeader(), channelheader); err != nil {
-		return nil, err
-	}
+	retTx.id = txID
 
-	retTx.id = TransactionID(channelheader.GetTxId())
-
-	tx := &fabricpeer.Transaction{}
-	if err := proto.Unmarshal(payload.GetData(), tx); err != nil {
-		return nil, err
-	}
-
-	if event, err := getEvent(tx); err != nil {
+	if details, err := NewTransactionDetails(payload.GetData()); err != nil {
 		return nil, err
 	} else {
-		retTx.event = event
+		retTx.details = details
 	}
 
 	return retTx, nil

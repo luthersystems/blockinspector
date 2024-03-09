@@ -4,10 +4,10 @@ go 1.22.0
 
 require (
 	github.com/alecthomas/kong v0.8.1
-	github.com/golang/protobuf v1.5.3
 	github.com/hyperledger/fabric v1.4.0-rc1.0.20240219033709-61fad7b14866
 	github.com/hyperledger/fabric-protos-go v0.3.3
 	github.com/olekukonko/tablewriter v0.0.5
+	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
 )
 
@@ -32,6 +32,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/fsouza/go-dockerclient v1.10.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/hyperledger/fabric-amcl v0.0.0-20230602173724-9e02669dceb2 // indirect
 	github.com/hyperledger/fabric-lib-go v1.0.0 // indirect
@@ -50,7 +51,6 @@ require (
 	github.com/opencontainers/runc v1.1.12 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/sykesm/zap-logfmt v0.0.4 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20210305035536-64b5b1c73954 // indirect
 	github.com/tedsuo/ifrit v0.0.0-20220120221754-dd274de71113 // indirect
