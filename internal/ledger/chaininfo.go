@@ -1,11 +1,13 @@
 package ledger
 
 import (
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	fabricpeer "github.com/hyperledger/fabric-protos-go/peer"
@@ -30,14 +32,24 @@ type CommonBlock struct {
 }
 
 func (s *CommonBlock) Write(w io.Writer) {
-	if s == nil {
+	if s == nil || w == nil {
 		return
 	}
 	if blk, err := NewBlock(&s.Block); err != nil {
 		logrus.WithError(err).Error("new block")
-		return
 	} else {
 		blk.Write(w)
+	}
+}
+
+func (s *CommonBlock) WriteCSV(w *csv.Writer) {
+	if s == nil || w == nil {
+		return
+	}
+	if blk, err := NewBlock(&s.Block); err != nil {
+		logrus.WithError(err).Error("new block")
+	} else {
+		blk.WriteCSV(w)
 	}
 }
 
@@ -65,6 +77,51 @@ func formatWithTrailingDots(input string, length int) string {
 		return fmt.Sprintf("%.*s...", length, input)
 	}
 	return input
+}
+
+func GetCSVBlockHeader() []string {
+	row := []string{
+		"block_num",
+		"block_size",
+		"tx_id",
+		"tx_valid",
+		"cc_id",
+		"tx_size",
+		"tx_rset_size",
+		"tx_wset_size",
+		"event_type",
+	}
+	row = append(row, GetLutherRecordHeader()...)
+	return row
+}
+
+func (b *Block) WriteCSV(w *csv.Writer) {
+	if b == nil || w == nil {
+		return
+	}
+	for i, t := range b.transactions {
+		details := t.GetDetails()
+		event := details.GetEvent()
+		eventType := ""
+		if event.IsLutherEvent() {
+			eventType = "luther_event"
+		}
+		row := []string{
+			fmt.Sprintf("%d", b.blockNum),
+			fmt.Sprintf("%d", b.size),
+			string(t.GetID()),
+			b.GetValidation(i).GetReason(),
+			event.GetChaincodeId(),
+			fmt.Sprintf("%d", t.GetSize()),
+			fmt.Sprintf("%d", details.GetReadSetSize()),
+			fmt.Sprintf("%d", details.GetWriteSetSize()),
+			eventType,
+		}
+		row = append(row, event.GetLutherRecord()...)
+		if err := w.Write(row); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write csv row [%d]: %v\n", b.blockNum, err)
+		}
+	}
 }
 
 func (b *Block) Write(w io.Writer) {
@@ -108,7 +165,7 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 		formatWithTrailingDots(string(t.GetID()), 6),
 		b.GetValidation(i).GetReason(),
 		event.GetChaincodeId(),
-		event.LutherDescription(),
+		event.String(),
 		fmt.Sprintf("%d", len(event.GetPayload())),
 		fmt.Sprintf("%d", t.GetSize()),
 	})
@@ -328,7 +385,22 @@ func (s *Event) IsLutherEvent() bool {
 	return s.GetEventName() == LutherEventKey
 }
 
-func (s *Event) LutherDescription() string {
+func GetLutherRecordHeader() []string {
+	return []string{"event_name", "event_timestamp", "req_id"}
+}
+
+func (s *Event) GetLutherRecord() []string {
+	if !s.IsLutherEvent() {
+		return []string{"", "", ""}
+	}
+	if lutherEvent, err := newLutherEvent(s); err != nil {
+		return []string{"", "", ""}
+	} else {
+		return []string{lutherEvent.GetName(), lutherEvent.GetTimestamp(), lutherEvent.GetRequestID()}
+	}
+}
+
+func (s *Event) String() string {
 	if !s.IsLutherEvent() {
 		return "<none>"
 	}
@@ -543,6 +615,26 @@ func (s *TransactionDetails) GetNamespaceReadWriteSet() []*NSRWSet {
 		return nil
 	}
 	return s.nsRWSets
+}
+
+func (s *TransactionDetails) GetReadSetSize() int64 {
+	var size int64
+	for _, rwset := range s.GetNamespaceReadWriteSet() {
+		for _, rset := range rwset.GetReadWriteSet().GetReadSet() {
+			size += int64(len(rset.GetKey()))
+		}
+	}
+	return size
+}
+
+func (s *TransactionDetails) GetWriteSetSize() int64 {
+	var size int64
+	for _, rwset := range s.GetNamespaceReadWriteSet() {
+		for _, wset := range rwset.GetReadWriteSet().GetWriteSet() {
+			size += int64(len(wset.GetKey())) + int64(len(wset.GetVal()))
+		}
+	}
+	return size
 }
 
 func NewTransactionDetails(txBytes []byte) (*TransactionDetails, error) {
