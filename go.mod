@@ -3,7 +3,6 @@ module github.com/luthersystems/blockinspector
 go 1.22.0
 
 require (
-	github.com/alecthomas/kong v0.8.1
 	github.com/hyperledger/fabric v1.4.0-rc1.0.20240219033709-61fad7b14866
 	github.com/hyperledger/fabric-protos-go v0.3.3
 	github.com/olekukonko/tablewriter v0.0.5
@@ -64,7 +63,7 @@ require (
 	golang.org/x/tools v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
 	google.golang.org/grpc v1.61.0 // indirect
-	google.golang.org/protobuf v1.32.0 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
