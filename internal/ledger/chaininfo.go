@@ -87,6 +87,7 @@ func GetCSVBlockHeader() []string {
 		"tx_valid",
 		"cc_id",
 		"tx_size",
+		"tx_request_size",
 		"tx_rset_size",
 		"tx_wset_size",
 		"event_type",
@@ -106,6 +107,7 @@ func (b *Block) WriteCSV(w *csv.Writer) {
 		if event.IsLutherEvent() {
 			eventType = "luther_event"
 		}
+		req := details.GetRequest()
 		row := []string{
 			fmt.Sprintf("%d", b.blockNum),
 			fmt.Sprintf("%d", b.size),
@@ -113,6 +115,7 @@ func (b *Block) WriteCSV(w *csv.Writer) {
 			b.GetValidation(i).GetReason(),
 			event.GetChaincodeId(),
 			fmt.Sprintf("%d", t.GetSize()),
+			fmt.Sprintf("%d", req.GetSize()),
 			fmt.Sprintf("%d", details.GetReadSetSize()),
 			fmt.Sprintf("%d", details.GetWriteSetSize()),
 			eventType,
@@ -157,16 +160,18 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 	}
 	t := b.transactions[i]
 	table := tablewriter.NewWriter(w)
-	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
+	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Request Size (bytes)", "Size (bytes)"})
 	table.SetCaption(true, fmt.Sprintf("Transactions (block=[%d])", b.blockNum))
 	details := t.GetDetails()
 	event := details.GetEvent()
+	req := details.GetRequest()
 	table.Append([]string{
 		formatWithTrailingDots(string(t.GetID()), 6),
 		b.GetValidation(i).GetReason(),
 		event.GetChaincodeId(),
 		event.String(),
 		fmt.Sprintf("%d", len(event.GetPayload())),
+		fmt.Sprintf("%d", req.GetSize()),
 		fmt.Sprintf("%d", t.GetSize()),
 	})
 	table.Render()
@@ -199,7 +204,19 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 				fmt.Sprintf("%d", len(record.GetVal())),
 			})
 		}
+		table.Render()
+		fmt.Fprintln(w)
 
+		table = tablewriter.NewWriter(w)
+		table.SetCaption(true, "Chaincode Input")
+		table.SetHeader([]string{"Arg", "Val"})
+
+		for i, arg := range details.GetRequest().GetArguments() {
+			table.Append([]string{
+				fmt.Sprintf("%d", i),
+				string(arg.GetBytes()),
+			})
+		}
 		table.Render()
 		fmt.Fprintln(w)
 	}
@@ -551,7 +568,7 @@ func getNSRWSets(results []byte) ([]*NSRWSet, error) {
 	return nsRWSets, nil
 }
 
-func getAction(txBytes []byte) (*fabricpeer.ChaincodeAction, error) {
+func getActionPayload(txBytes []byte) (*fabricpeer.ChaincodeActionPayload, error) {
 	if len(txBytes) == 0 {
 		return nil, nil
 	}
@@ -572,7 +589,16 @@ func getAction(txBytes []byte) (*fabricpeer.ChaincodeAction, error) {
 		return nil, err
 	}
 
-	proposalResponse, err := protoutil.UnmarshalProposalResponsePayload(chaincodeActionPayload.GetAction().GetProposalResponsePayload())
+	chaincodeActionPayload.GetChaincodeProposalPayload()
+
+	return chaincodeActionPayload, nil
+}
+
+func getAction(propResponseBytes []byte) (*fabricpeer.ChaincodeAction, error) {
+	if len(propResponseBytes) == 0 {
+		return nil, nil
+	}
+	proposalResponse, err := protoutil.UnmarshalProposalResponsePayload(propResponseBytes)
 	if err != nil {
 		logrus.WithError(err).Info("invalid proposal response")
 		return nil, nil
@@ -600,7 +626,77 @@ func getEvent(eventBytes []byte) (*Event, error) {
 
 type TransactionDetails struct {
 	event    *Event
+	req      *Request
 	nsRWSets []*NSRWSet
+}
+
+func getRequest(propBytes []byte) (*Request, error) {
+	if len(propBytes) == 0 {
+		return nil, nil
+	}
+
+	proposal, err := protoutil.UnmarshalChaincodeProposalPayload(propBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	input, err := protoutil.UnmarshalChaincodeInvocationSpec(proposal.GetInput())
+	if err != nil {
+		return nil, err
+	}
+
+	args := make([]*RequestArgument, len(input.GetChaincodeSpec().GetInput().GetArgs()))
+	size := 0
+
+	for i, arg := range input.GetChaincodeSpec().GetInput().GetArgs() {
+		args[i] = &RequestArgument{b: arg}
+		size += len(arg)
+	}
+
+	return &Request{
+		args: args,
+		size: size,
+	}, nil
+}
+
+type RequestArgument struct {
+	b []byte
+}
+
+func (s *RequestArgument) GetBytes() []byte {
+	if s == nil {
+		return nil
+	}
+
+	return s.b
+}
+
+type Request struct {
+	args []*RequestArgument
+	size int
+}
+
+func (s *Request) GetArguments() []*RequestArgument {
+	if s == nil {
+		return nil
+	}
+
+	return s.args
+}
+
+func (s *Request) GetSize() int {
+	if s == nil {
+		return 0
+	}
+	return s.size
+}
+
+func (s *TransactionDetails) GetRequest() *Request {
+	if s == nil {
+		return nil
+	}
+
+	return s.req
 }
 
 func (s *TransactionDetails) GetEvent() *Event {
@@ -638,12 +734,23 @@ func (s *TransactionDetails) GetWriteSetSize() int64 {
 }
 
 func NewTransactionDetails(txBytes []byte) (*TransactionDetails, error) {
-	chaincodeAction, err := getAction(txBytes)
+	actionPayload, err := getActionPayload(txBytes)
 	if err != nil {
 		return nil, err
 	}
 
 	details := &TransactionDetails{}
+
+	if req, err := getRequest(actionPayload.GetChaincodeProposalPayload()); err != nil {
+		return nil, err
+	} else {
+		details.req = req
+	}
+
+	chaincodeAction, err := getAction(actionPayload.GetAction().GetProposalResponsePayload())
+	if err != nil {
+		return nil, err
+	}
 
 	if event, err := getEvent(chaincodeAction.GetEvents()); err != nil {
 		return nil, err

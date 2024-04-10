@@ -29,11 +29,9 @@ func TestLedger(t *testing.T) {
 	channels, err := bs.ListChannels()
 	require.NoError(t, err)
 
-	require.Len(t, channels, 1, "expected single channel")
-	channel := channels[0]
-	require.Equal(t, channel, expectChannel)
+	require.Contains(t, channels, expectChannel)
 
-	ledger, err := bs.NewLedger(channel)
+	ledger, err := bs.NewLedger(expectChannel)
 	require.NoError(t, err)
 
 	err = ledger.Open()

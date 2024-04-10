@@ -126,9 +126,9 @@ type BlockIterator interface {
 }
 
 type ledgerBlockIterator struct {
+	iter  cledger.ResultsIterator
 	start uint64
 	end   uint64
-	iter  cledger.ResultsIterator
 }
 
 // Next returns the next block, or nil if there are no more blocks.
