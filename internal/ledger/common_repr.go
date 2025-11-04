@@ -235,4 +235,3 @@ func (lv *LedgerView) hasTransactionInfo() bool {
 func GetCSVLedgerViewHeader() []string {
 	return []string{"type", "namespace_or_collection", "key", "value_size_bytes", "is_read", "is_write", "tx_id", "block_num"}
 }
-
