@@ -9,6 +9,8 @@ linters-settings:
     check-shadowing: true
   misspell:
     locale: US
+  staticcheck:
+    checks: ["all", "-SA1019"]
 
 linters:
   enable:
