@@ -30,6 +30,6 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
   exclude-rules:
-    - text: "SA1019.*github.com/golang/protobuf/proto.*deprecated"
+    - text: "github.com/golang/protobuf/proto.*is deprecated"
       linters:
         - staticcheck
