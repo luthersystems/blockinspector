@@ -9,10 +9,15 @@ import (
 	"io"
 	"os"
 
+	"github.com/golang/protobuf/proto"
 	cb "github.com/hyperledger/fabric-protos-go/common"
+	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
+	"github.com/hyperledger/fabric-protos-go/ledger/rwset/kvrwset"
 	fabricpeer "github.com/hyperledger/fabric-protos-go/peer"
-	"github.com/hyperledger/fabric/protoutil"
+	fabricprotoutil "github.com/hyperledger/fabric/protoutil"
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/tw"
+	pkgerrors "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -133,8 +138,8 @@ func (b *Block) Write(w io.Writer) {
 		return
 	}
 	table := tablewriter.NewWriter(w)
-	table.SetHeader([]string{"Block Num", "Hash", "Num Txs", "Size (bytes)"})
-	table.SetCaption(true, "Block Summary")
+	table.Header("Block Num", "Hash", "Num Txs", "Size (bytes)")
+	table.Caption(tw.Caption{Text: "Block Summary"})
 	table.Append([]string{
 		fmt.Sprintf("%d", b.blockNum),
 		formatWithTrailingDots(b.hash, 6),
@@ -157,8 +162,8 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 	}
 	t := b.transactions[i]
 	table := tablewriter.NewWriter(w)
-	table.SetHeader([]string{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"})
-	table.SetCaption(true, fmt.Sprintf("Transactions (block=[%d])", b.blockNum))
+	table.Header("ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)")
+	table.Caption(tw.Caption{Text: fmt.Sprintf("Transactions (block=[%d])", b.blockNum)})
 	details := t.GetDetails()
 	event := details.GetEvent()
 	table.Append([]string{
@@ -179,8 +184,8 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 		rwSet := nsRWSet.GetReadWriteSet()
 
 		table = tablewriter.NewWriter(w)
-		table.SetCaption(true, fmt.Sprintf("Read Set (namespace=[%s], txid=[%s])", nsRWSet.GetNamespace(), t.GetID()))
-		table.SetHeader([]string{"Key", "Version"})
+		table.Caption(tw.Caption{Text: fmt.Sprintf("Read Set (namespace=[%s], txid=[%s])", nsRWSet.GetNamespace(), t.GetID())})
+		table.Header("Key", "Version")
 		for _, record := range rwSet.GetReadSet() {
 			table.Append([]string{
 				record.GetKey(),
@@ -191,8 +196,8 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 		fmt.Fprintln(w)
 
 		table = tablewriter.NewWriter(w)
-		table.SetCaption(true, fmt.Sprintf("Write Set [%s]", nsRWSet.GetNamespace()))
-		table.SetHeader([]string{"Key", "Val (size)"})
+		table.Caption(tw.Caption{Text: fmt.Sprintf("Write Set [%s]", nsRWSet.GetNamespace())})
+		table.Header("Key", "Val (size)")
 		for _, record := range rwSet.GetWriteSet() {
 			table.Append([]string{
 				record.GetKey(),
@@ -511,17 +516,19 @@ func getNSRWSets(results []byte) ([]*NSRWSet, error) {
 	if len(results) == 0 {
 		return nil, nil
 	}
-	txRwSet, err := protoutil.UnmarshalTxReadWriteSet(results)
+	txRwSet := &rwset.TxReadWriteSet{}
+	err := proto.Unmarshal(results, txRwSet)
 	if err != nil {
-		return nil, err
+		return nil, pkgerrors.Wrap(err, "error unmarshalling TxReadWriteSet")
 	}
 
 	nsRWSets := make([]*NSRWSet, 0, len(txRwSet.GetNsRwset()))
 
 	for _, txrw := range txRwSet.GetNsRwset() {
-		rwSet, err := protoutil.UnmarshalKVRWSet(txrw.GetRwset())
+		rwSet := &kvrwset.KVRWSet{}
+		err := proto.Unmarshal(txrw.GetRwset(), rwSet)
 		if err != nil {
-			return nil, err
+			return nil, pkgerrors.Wrap(err, "error unmarshalling KVRWSet")
 		}
 		rwSetExtracted := &RWSet{
 			ReadSet:  []*RSetRecord{},
@@ -555,7 +562,7 @@ func getAction(txBytes []byte) (*fabricpeer.ChaincodeAction, error) {
 	if len(txBytes) == 0 {
 		return nil, nil
 	}
-	tx, err := protoutil.UnmarshalTransaction(txBytes)
+	tx, err := fabricprotoutil.UnmarshalTransaction(txBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -567,18 +574,18 @@ func getAction(txBytes []byte) (*fabricpeer.ChaincodeAction, error) {
 
 	action := actions[0]
 
-	chaincodeActionPayload, err := protoutil.UnmarshalChaincodeActionPayload(action.GetPayload())
+	chaincodeActionPayload, err := fabricprotoutil.UnmarshalChaincodeActionPayload(action.GetPayload())
 	if err != nil {
 		return nil, err
 	}
 
-	proposalResponse, err := protoutil.UnmarshalProposalResponsePayload(chaincodeActionPayload.GetAction().GetProposalResponsePayload())
+	proposalResponse, err := fabricprotoutil.UnmarshalProposalResponsePayload(chaincodeActionPayload.GetAction().GetProposalResponsePayload())
 	if err != nil {
 		logrus.WithError(err).Info("invalid proposal response")
 		return nil, nil
 	}
 
-	chaincodeAction, err := protoutil.UnmarshalChaincodeAction(proposalResponse.GetExtension())
+	chaincodeAction, err := fabricprotoutil.UnmarshalChaincodeAction(proposalResponse.GetExtension())
 	if err != nil {
 		return nil, err
 	}
@@ -590,7 +597,7 @@ func getEvent(eventBytes []byte) (*Event, error) {
 	if len(eventBytes) == 0 {
 		return nil, nil
 	}
-	event, err := protoutil.UnmarshalChaincodeEvents(eventBytes)
+	event, err := fabricprotoutil.UnmarshalChaincodeEvents(eventBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -665,12 +672,12 @@ func getPayload(envelopeBytes []byte) (*cb.Payload, error) {
 		return nil, fmt.Errorf("empty envelope")
 	}
 
-	envelope, err := protoutil.UnmarshalEnvelope(envelopeBytes)
+	envelope, err := fabricprotoutil.UnmarshalEnvelope(envelopeBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	payload, err := protoutil.UnmarshalPayload(envelope.GetPayload())
+	payload, err := fabricprotoutil.UnmarshalPayload(envelope.GetPayload())
 	if err != nil {
 		return nil, err
 	}
@@ -679,7 +686,7 @@ func getPayload(envelopeBytes []byte) (*cb.Payload, error) {
 }
 
 func getTransactionID(chanHeaderBytes []byte) (TransactionID, error) {
-	channelheader, err := protoutil.UnmarshalChannelHeader(chanHeaderBytes)
+	channelheader, err := fabricprotoutil.UnmarshalChannelHeader(chanHeaderBytes)
 	if err != nil {
 		return "", err
 	} else {

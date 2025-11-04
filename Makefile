@@ -30,7 +30,3 @@ go-test:
 .PHONY: install
 install:
 	go install ./cmd/blockinspector
-
-.PHONY: static-checks
-static-checks:
-	./scripts/static-checks.sh
