@@ -13,7 +13,6 @@ linters-settings:
 linters:
   enable:
     - errcheck
-    - goimports
     - govet
     - ineffassign
     - misspell
@@ -23,6 +22,7 @@ linters:
 formatters:
   enable:
     - gofmt
+    - goimports
 
 issues:
   exclude-use-default: false
