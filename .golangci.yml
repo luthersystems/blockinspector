@@ -30,6 +30,7 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
   exclude-rules:
-    - text: "github.com/golang/protobuf/proto.*is deprecated"
+    - path: internal/ledger/chaininfo\.go
       linters:
         - staticcheck
+      text: "SA1019"
