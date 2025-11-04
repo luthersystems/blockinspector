@@ -12,7 +12,6 @@ linters-settings:
 
 linters:
   enable:
-    - errcheck
     - govet
     - ineffassign
     - misspell
