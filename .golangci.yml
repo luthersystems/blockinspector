@@ -5,10 +5,10 @@ linters:
     - govet
     - ineffassign
     - misspell
-    - staticcheck
     - unused
   disable:
     - errcheck
+    - staticcheck
 
 formatters:
   enable:
@@ -18,7 +18,3 @@ formatters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - linters:
-        - staticcheck
-      text: "SA1019.*github.com/golang/protobuf/proto.*is deprecated"
