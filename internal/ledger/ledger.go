@@ -8,8 +8,8 @@ import (
 	"github.com/hyperledger/fabric-protos-go/common"
 	cledger "github.com/hyperledger/fabric/common/ledger"
 	"github.com/hyperledger/fabric/common/ledger/blkstorage"
+	"github.com/hyperledger/fabric/common/ledger/blkstorage/fsblkstorage"
 	"github.com/hyperledger/fabric/common/metrics/disabled"
-	"github.com/hyperledger/fabric/core/ledger/kvledger"
 )
 
 const (
@@ -18,7 +18,7 @@ const (
 )
 
 type blockStore struct {
-	blockStoreProvider *blkstorage.BlockStoreProvider
+	blockStoreProvider blkstorage.BlockStoreProvider
 	path               string
 	orderer            bool
 }
@@ -62,7 +62,7 @@ func (s *blockStore) ListChannels() ([]string, error) {
 
 type ledger struct {
 	parentProvider *blockStore
-	blockStore     *blkstorage.BlockStore
+	blockStore     blkstorage.BlockStore
 	channelID      string
 }
 
@@ -92,7 +92,7 @@ func (s *ledger) Open() error {
 	if s.blockStore != nil {
 		return fmt.Errorf("ledger open")
 	}
-	if blockStore, err := s.parentProvider.blockStoreProvider.Open(s.channelID); err != nil {
+	if blockStore, err := s.parentProvider.blockStoreProvider.OpenBlockStore(s.channelID); err != nil {
 		return err
 	} else {
 		s.blockStore = blockStore
@@ -223,7 +223,8 @@ func getBlockStorePath(fsPath string, orderer bool) (string, error) {
 	if orderer {
 		blockStorePath = filepath.Join(fsPath, ordererDataDirName)
 	} else {
-		blockStorePath = kvledger.BlockStorePath(filepath.Join(fsPath, ledgersDataDirName))
+		// BlockStorePath(rootFSPath) returns filepath.Join(rootFSPath, "chains")
+		blockStorePath = filepath.Join(fsPath, ledgersDataDirName, "chains")
 	}
 	isEmpty, err := dirEmpty(blockStorePath)
 	if err != nil {
@@ -236,7 +237,7 @@ func getBlockStorePath(fsPath string, orderer bool) (string, error) {
 }
 
 // getBlockStoreProvider - Gets a default block store provider to access the peer's block store
-func getBlockStoreProvider(fsPath string, orderer bool) (*blkstorage.BlockStoreProvider, error) {
+func getBlockStoreProvider(fsPath string, orderer bool) (blkstorage.BlockStoreProvider, error) {
 	blockStorePath, err := getBlockStorePath(fsPath, orderer)
 	if err != nil {
 		return nil, err
@@ -253,14 +254,14 @@ func getBlockStoreProvider(fsPath string, orderer bool) (*blkstorage.BlockStoreP
 		}...)
 	}
 
-	conf := blkstorage.NewConf(blockStorePath, -1)
+	conf := fsblkstorage.NewConf(blockStorePath, -1)
 	indexConfig := &blkstorage.IndexConfig{
 		AttrsToIndex: attrs,
 	}
 	metricsProvider := &disabled.Provider{}
 
 	// Create new block store provider
-	blockStoreProvider, err := blkstorage.NewProvider(conf, indexConfig, metricsProvider)
+	blockStoreProvider, err := fsblkstorage.NewProvider(conf, indexConfig, metricsProvider)
 	if err != nil {
 		return nil, err
 	}

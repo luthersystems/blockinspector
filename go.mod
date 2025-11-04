@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/alecthomas/kong v1.12.1
-	github.com/hyperledger/fabric v1.4.0-rc1.0.20240219033709-61fad7b14866
+	github.com/hyperledger/fabric v2.1.1+incompatible
 	github.com/hyperledger/fabric-protos-go v0.3.7
 	github.com/hyperledger/fabric-protos-go-apiv2 v0.3.7
 	github.com/olekukonko/tablewriter v1.1.0
