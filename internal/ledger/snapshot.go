@@ -133,7 +133,6 @@ func LoadSnapshot(r io.Reader) (*SnapshotState, error) {
 		return nil, err
 	}
 
-	state.stats = state.stats
 	return state, nil
 }
 
