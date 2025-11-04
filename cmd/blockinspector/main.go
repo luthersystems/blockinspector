@@ -76,7 +76,7 @@ func inspectSnapshot(snapshotFile string, outputCSV bool) {
 		csvWriter = csv.NewWriter(os.Stdout)
 		defer csvWriter.Flush()
 
-		if err := csvWriter.Write(ledger.GetCSVSnapshotHeader()); err != nil {
+		if err := csvWriter.Write(ledger.GetCSVLedgerViewHeader()); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write header: %v\n", err)
 		}
 	}
