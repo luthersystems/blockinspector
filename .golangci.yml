@@ -1,16 +1,4 @@
-version: 2
-
-linters-settings:
-  gofmt:
-    simplify: true
-  goimports:
-    local-prefixes: github.com/luthersystems/blockinspector
-  govet:
-    check-shadowing: true
-  misspell:
-    locale: US
-  staticcheck:
-    checks: ["all", "-SA1019"]
+version: "2"
 
 linters:
   enable:
@@ -28,6 +16,9 @@ formatters:
     - goimports
 
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    - linters:
+        - staticcheck
+      text: "SA1019.*github.com/golang/protobuf/proto.*is deprecated"
