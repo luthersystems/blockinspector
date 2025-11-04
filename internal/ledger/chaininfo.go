@@ -129,6 +129,63 @@ func (b *Block) WriteCSV(w *csv.Writer) {
 	}
 }
 
+// ToLedgerView converts a Block to a LedgerView
+func (b *Block) ToLedgerView() *LedgerView {
+	if b == nil {
+		return NewLedgerView()
+	}
+
+	view := NewLedgerView()
+	view.Statistics.BlockCount = 1
+	view.Statistics.TransactionCount = len(b.transactions)
+
+	for _, tx := range b.transactions {
+		details := tx.GetDetails()
+		if details == nil {
+			continue
+		}
+
+		for _, nsRWSet := range details.GetNamespaceReadWriteSet() {
+			if nsRWSet.GetNamespace() == "_lifecycle" && skipLifecycleRWSet {
+				continue
+			}
+			rwSet := nsRWSet.GetReadWriteSet()
+
+			// Add read set keys
+			for _, record := range rwSet.GetReadSet() {
+				view.AddKey(&KeyRecord{
+					Type:        "state",
+					Namespace:   nsRWSet.GetNamespace(),
+					Key:         record.GetKey(),
+					ValueSize:   0, // read sets don't have values
+					Version:     record.GetVersion(),
+					IsRead:      true,
+					IsWrite:     false,
+					Transaction: string(tx.GetID()),
+					BlockNum:    b.blockNum,
+				})
+			}
+
+			// Add write set keys
+			for _, record := range rwSet.GetWriteSet() {
+				view.AddKey(&KeyRecord{
+					Type:        "state",
+					Namespace:   nsRWSet.GetNamespace(),
+					Key:         record.GetKey(),
+					Value:       record.GetVal(),
+					ValueSize:   len(record.GetVal()),
+					IsRead:      false,
+					IsWrite:     true,
+					Transaction: string(tx.GetID()),
+					BlockNum:    b.blockNum,
+				})
+			}
+		}
+	}
+
+	return view
+}
+
 func (b *Block) Write(w io.Writer) {
 	if w == nil {
 		return

@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/alecthomas/kong v1.12.1
-	github.com/hyperledger/fabric v2.1.1+incompatible
+	github.com/hyperledger/fabric v0.0.0-00010101000000-000000000000
 	github.com/hyperledger/fabric-protos-go v0.3.7
 	github.com/hyperledger/fabric-protos-go-apiv2 v0.3.7
 	github.com/olekukonko/tablewriter v1.1.0
@@ -88,6 +88,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
+
+replace github.com/hyperledger/fabric => github.com/hyperledger/fabric v0.0.0-20251012211716-24767bad4dda
 
 replace github.com/Shopify/sarama => github.com/IBM/sarama v1.46.3
 

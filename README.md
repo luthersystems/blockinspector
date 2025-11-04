@@ -61,12 +61,32 @@ Example:
 blockinspector range-orderer ./orderer/chains mychannel 0 10
 ```
 
+### Inspect Luther Snapshot Ledger
+
+```bash
+blockinspector snapshot <SNAPSHOTFILE>
+```
+
+Example:
+```bash
+blockinspector snapshot ./test_snapshot.bak
+```
+
+This command loads and inspects a Luther snapshot ledger file (Badger DB backup format). Snapshots are created when running Go tests with the Luther platform and plugin, allowing developers to quickly resume from a ledger state without running a full Fabric network.
+
+The snapshot inspector shows:
+- Summary statistics (total keys, sizes)
+- Namespace and collection breakdowns
+- All state keys grouped by namespace
+- All private data keys grouped by collection
+
 ### Parameters
 
 - `LEDGERDIR`: Directory containing ledger data (for peers: `ledgersData/chains`, for orderers: `orderer/chains`)
 - `CHANNEL`: Name of the channel to inspect
 - `START`: Start block number (inclusive)
 - `END`: End block number (exclusive). Use `0` to iterate through all blocks
+- `SNAPSHOTFILE`: Path to a Luther snapshot file (Badger DB backup format)
 
 ### Output Formats
 
