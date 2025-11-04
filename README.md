@@ -77,6 +77,73 @@ The default output displays blocks and transactions in a formatted table showing
 - Transaction details with validation status, chaincode ID, and event information
 - Read-write sets with keys and versions
 
+**Example Output:**
+
+```
+┌───────────┬───────────┬─────────┬─────────────────┐
+│ BLOCK NUM │   HASH    │ NUM TXS │ SIZE  ( BYTES ) │
+├───────────┼───────────┼─────────┼─────────────────┤
+│ 1         │ f38eb8... │ 1       │ 4834            │
+└───────────┴───────────┴─────────┴─────────────────┘
+                    Block Summary                    
+
+┌───────────┬────────────┬──────────────┬──────────────┬───────────────────────┬─────────────────┐
+│    ID     │ VALIDATION │ CHAINCODE ID │ LUTHER EVENT │ EVENT SIZE  ( BYTES ) │ SIZE  ( BYTES ) │
+├───────────┼────────────┼──────────────┼──────────────┼───────────────────────┼─────────────────┤
+│ 8d4dbd... │ VALID      │              │ <none>       │ 0                     │ 3755            │
+└───────────┴────────────┴──────────────┴──────────────┴───────────────────────┴─────────────────┘
+                                     Transactions (block=[1])                                     
+
+┌─────────┬─────────┐
+│   KEY   │ VERSION │
+├─────────┼─────────┤
+│ marbles │ (0:0)   │
+└─────────┴─────────┘
+Read Set (namespace=[lscc], txid=[8d4dbd2d73f6d78a0716ae72baabe97521642931ae3483b2e78e477b0298a642])
+
+┌─────┬───────────────┐
+│ KEY │ VAL  ( SIZE ) │
+└─────┴───────────────┘
+    Write Set [lscc]   
+
+
+┌───────────┬───────────┬─────────┬─────────────────┐
+│ BLOCK NUM │   HASH    │ NUM TXS │ SIZE  ( BYTES ) │
+├───────────┼───────────┼─────────┼─────────────────┤
+│ 4         │ 28bb5b... │ 1       │ 4783            │
+└───────────┴───────────┴─────────┴─────────────────┘
+                    Block Summary                    
+
+┌───────────┬────────────┬──────────────┬──────────────┬───────────────────────┬─────────────────┐
+│    ID     │ VALIDATION │ CHAINCODE ID │ LUTHER EVENT │ EVENT SIZE  ( BYTES ) │ SIZE  ( BYTES ) │
+├───────────┼────────────┼──────────────┼──────────────┼───────────────────────┼─────────────────┤
+│ 5a3b2c... │ VALID      │ marbles      │ <none>       │ 0                     │ 3183            │
+└───────────┴────────────┴──────────────┴──────────────┴───────────────────────┴─────────────────┘
+                                     Transactions (block=[4])                                     
+
+┌───────────────┬─────────┐
+│      KEY      │ VERSION │
+├───────────────┼─────────┤
+│ marble1       │ (3:0)   │
+│ color~name    │ (3:0)   │
+└───────────────┴─────────┘
+Read Set (namespace=[marbles], txid=[5a3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2])
+
+┌───────────────────────┬───────────────┐
+│         KEY           │ VAL  ( SIZE ) │
+├───────────────────────┼───────────────┤
+│ color~name~blue~marble│ 1             │
+│ marble1               │ 76            │
+└───────────────────────┴───────────────┘
+           Write Set [marbles]           
+```
+
+This example demonstrates:
+- **Block Summary**: Shows block metadata (number, hash, transaction count, total size)
+- **Transaction Details**: Displays transaction ID, validation status, chaincode ID, events, and sizes
+- **Read Set**: Lists all keys read by the transaction with their versions (format: `(block:tx)`)
+- **Write Set**: Shows all keys written by the transaction with their value sizes in bytes
+
 #### CSV Format
 
 To output in CSV format for further analysis:
