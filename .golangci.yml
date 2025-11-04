@@ -17,6 +17,8 @@ linters:
     - misspell
     - staticcheck
     - unused
+  disable:
+    - errcheck
 
 formatters:
   enable:
@@ -27,3 +29,7 @@ issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    - text: "SA1019.*github.com/golang/protobuf/proto.*deprecated"
+      linters:
+        - staticcheck
