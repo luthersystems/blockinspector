@@ -35,4 +35,3 @@ issues:
     - path: internal/ledger/chaininfo\.go
       linters:
         - errcheck
-      text: "Error return value of.*(fmt\\.Fprint|table\\.(Append|Render))"
