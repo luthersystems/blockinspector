@@ -13,13 +13,16 @@ linters-settings:
 linters:
   enable:
     - errcheck
-    - gofmt
     - goimports
     - govet
     - ineffassign
     - misspell
     - staticcheck
     - unused
+
+formatters:
+  enable:
+    - gofmt
 
 issues:
   exclude-use-default: false
