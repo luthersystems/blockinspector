@@ -45,6 +45,7 @@ func createTestSnapshot(t *testing.T, entries map[string]string) *bytes.Buffer {
 }
 
 func TestLoadSnapshot(t *testing.T) {
+	t.Parallel()
 	entries := map[string]string{
 		"state\x00mycc\x00key1":              "value1",
 		"state\x00mycc\x00key2":              "value2",
@@ -57,22 +58,39 @@ func TestLoadSnapshot(t *testing.T) {
 	state, err := LoadSnapshot(buf)
 	require.NoError(t, err)
 
+	// Verify statistics
 	stats := state.GetStats()
 	assert.Equal(t, 3, stats.TotalStateKeys)
 	assert.Equal(t, 1, stats.TotalPrivateKeys)
 	assert.Equal(t, int64(len("value1")+len("value2")+len("value3")), stats.TotalStateSize)
 	assert.Equal(t, int64(len("secretval")), stats.TotalPrivateSize)
-
 	assert.Equal(t, 2, stats.Namespaces["mycc"])
 	assert.Equal(t, 1, stats.Namespaces["othercc"])
 	assert.Equal(t, 1, stats.Collections["mycollection"])
+
+	// Verify actual key content
+	require.Len(t, state.StateKeys, 3)
+	stateByKey := make(map[string]*StateKey)
+	for _, sk := range state.StateKeys {
+		stateByKey[sk.Namespace+"/"+sk.Key] = sk
+	}
+	assert.Equal(t, []byte("value1"), stateByKey["mycc/key1"].Value)
+	assert.Equal(t, []byte("value2"), stateByKey["mycc/key2"].Value)
+	assert.Equal(t, "othercc", stateByKey["othercc/key3"].Namespace)
+
+	require.Len(t, state.PrivateKeys, 1)
+	assert.Equal(t, "mycollection", state.PrivateKeys[0].Collection)
+	assert.Equal(t, "secret1", state.PrivateKeys[0].Key)
+	assert.Equal(t, []byte("secretval"), state.PrivateKeys[0].Value)
 }
 
 func TestLoadSnapshotSkipsMalformedKeys(t *testing.T) {
+	t.Parallel()
 	entries := map[string]string{
-		"state\x00mycc\x00key1": "value1",
-		"badkey":                "ignored",      // no null separators
-		"also\x00bad":           "also_ignored", // only one separator
+		"state\x00mycc\x00key1":  "value1",
+		"badkey":                 "ignored",        // no null separators
+		"also\x00bad":            "also_ignored",   // only one separator
+		"metadata\x00foo\x00bar": "unknown_prefix", // correct format but unknown prefix
 	}
 
 	buf := createTestSnapshot(t, entries)
@@ -82,9 +100,12 @@ func TestLoadSnapshotSkipsMalformedKeys(t *testing.T) {
 
 	assert.Equal(t, 1, state.GetStats().TotalStateKeys)
 	assert.Equal(t, 0, state.GetStats().TotalPrivateKeys)
+	assert.Len(t, state.StateKeys, 1)
+	assert.Equal(t, "key1", state.StateKeys[0].Key)
 }
 
 func TestLoadSnapshotEmpty(t *testing.T) {
+	t.Parallel()
 	buf := createTestSnapshot(t, map[string]string{})
 
 	state, err := LoadSnapshot(buf)
@@ -96,7 +117,15 @@ func TestLoadSnapshotEmpty(t *testing.T) {
 	assert.Empty(t, state.PrivateKeys)
 }
 
+func TestLoadSnapshotFromFileError(t *testing.T) {
+	t.Parallel()
+	_, err := LoadSnapshotFromFile("/nonexistent/path/snapshot.bak")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to open snapshot file")
+}
+
 func TestSnapshotToLedgerView(t *testing.T) {
+	t.Parallel()
 	entries := map[string]string{
 		"state\x00mycc\x00key1":              "value1",
 		"private\x00mycollection\x00secret1": "secretval",
@@ -116,20 +145,40 @@ func TestSnapshotToLedgerView(t *testing.T) {
 
 	// Snapshot keys should be marked as writes, not reads
 	for _, key := range view.Keys {
-		assert.False(t, key.IsRead)
-		assert.True(t, key.IsWrite)
+		assert.False(t, key.IsRead, "snapshot keys should not be reads")
+		assert.True(t, key.IsWrite, "snapshot keys should be writes")
 		assert.Empty(t, key.Transaction, "snapshot keys should have no transaction info")
+		assert.Equal(t, uint64(0), key.BlockNum, "snapshot keys should have no block number")
 	}
+
+	// Verify key content is preserved through conversion
+	keysByName := make(map[string]*KeyRecord)
+	for _, k := range view.Keys {
+		keysByName[k.Key] = k
+	}
+	require.Contains(t, keysByName, "key1")
+	assert.Equal(t, "state", keysByName["key1"].Type)
+	assert.Equal(t, "mycc", keysByName["key1"].Namespace)
+	assert.Equal(t, len("value1"), keysByName["key1"].ValueSize)
+
+	require.Contains(t, keysByName, "secret1")
+	assert.Equal(t, "private", keysByName["secret1"].Type)
+	assert.Equal(t, "mycollection", keysByName["secret1"].Namespace)
 }
 
 func TestSnapshotToLedgerViewNil(t *testing.T) {
+	t.Parallel()
 	var s *SnapshotState
 	view := s.ToLedgerView()
-	assert.NotNil(t, view)
+	require.NotNil(t, view)
 	assert.Equal(t, 0, view.Statistics.TotalKeys)
+	assert.Empty(t, view.Keys)
+	assert.NotNil(t, view.Statistics.Namespaces)
+	assert.NotNil(t, view.Statistics.Collections)
 }
 
 func TestSnapshotWrite(t *testing.T) {
+	t.Parallel()
 	entries := map[string]string{
 		"state\x00mycc\x00key1": "value1",
 	}
@@ -144,11 +193,15 @@ func TestSnapshotWrite(t *testing.T) {
 	output := out.String()
 	assert.Contains(t, output, "Ledger Summary")
 	assert.Contains(t, output, "Total Keys")
+	assert.Contains(t, output, "State Namespaces")
 	assert.Contains(t, output, "mycc")
 	assert.Contains(t, output, "key1")
+	// Verify value size appears in the output
+	assert.Contains(t, output, "6", "value1 is 6 bytes")
 }
 
 func TestSnapshotWriteNil(t *testing.T) {
+	t.Parallel()
 	var s *SnapshotState
 	var buf bytes.Buffer
 	s.Write(&buf) // should not panic
@@ -156,6 +209,7 @@ func TestSnapshotWriteNil(t *testing.T) {
 }
 
 func TestSnapshotWriteCSV(t *testing.T) {
+	t.Parallel()
 	entries := map[string]string{
 		"state\x00mycc\x00key1":              "value1",
 		"private\x00mycollection\x00secret1": "secretval",
@@ -167,23 +221,54 @@ func TestSnapshotWriteCSV(t *testing.T) {
 
 	var out bytes.Buffer
 	w := csv.NewWriter(&out)
-	err = w.Write(GetCSVLedgerViewHeader())
-	require.NoError(t, err)
+	require.NoError(t, w.Write(GetCSVLedgerViewHeader()))
 	state.WriteCSV(w)
 	w.Flush()
 
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	assert.Equal(t, 3, len(lines), "expected 1 header + 2 data rows")
+	// Parse CSV properly
+	reader := csv.NewReader(strings.NewReader(out.String()))
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 3, "expected 1 header + 2 data rows")
 
 	// Verify header
-	assert.Equal(t, "type,namespace_or_collection,key,value_size_bytes,is_read,is_write,tx_id,block_num", lines[0])
+	assert.Equal(t, GetCSVLedgerViewHeader(), records[0])
+
+	// Verify all rows have the same number of columns as the header
+	for i, row := range records {
+		assert.Len(t, row, len(records[0]), "row %d should have same column count as header", i)
+	}
 
 	// Verify no duplicate header
 	headerCount := 0
-	for _, line := range lines {
-		if strings.HasPrefix(line, "type,") {
+	for _, row := range records {
+		if row[0] == "type" {
 			headerCount++
 		}
 	}
 	assert.Equal(t, 1, headerCount, "should have exactly one header row")
+
+	// Verify data content by building a map of key -> record
+	dataByKey := make(map[string][]string)
+	for _, row := range records[1:] {
+		dataByKey[row[2]] = row // index by key column
+	}
+
+	// Check state key
+	require.Contains(t, dataByKey, "key1")
+	stateRow := dataByKey["key1"]
+	assert.Equal(t, "state", stateRow[0])
+	assert.Equal(t, "mycc", stateRow[1])
+	assert.Equal(t, "6", stateRow[3])     // value_size_bytes for "value1"
+	assert.Equal(t, "false", stateRow[4]) // is_read
+	assert.Equal(t, "true", stateRow[5])  // is_write
+
+	// Check private key
+	require.Contains(t, dataByKey, "secret1")
+	privateRow := dataByKey["secret1"]
+	assert.Equal(t, "private", privateRow[0])
+	assert.Equal(t, "mycollection", privateRow[1])
+	assert.Equal(t, "9", privateRow[3])     // value_size_bytes for "secretval"
+	assert.Equal(t, "false", privateRow[4]) // is_read
+	assert.Equal(t, "true", privateRow[5])  // is_write
 }

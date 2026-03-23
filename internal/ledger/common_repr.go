@@ -204,24 +204,13 @@ func (lv *LedgerView) WriteCSV(w *csv.Writer) {
 			fmt.Sprintf("%d", key.ValueSize),
 			fmt.Sprintf("%v", key.IsRead),
 			fmt.Sprintf("%v", key.IsWrite),
-		}
-		if lv.hasTransactionInfo() {
-			row = append(row, key.Transaction, fmt.Sprintf("%d", key.BlockNum))
+			key.Transaction,
+			fmt.Sprintf("%d", key.BlockNum),
 		}
 		if err := w.Write(row); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write CSV row: %v\n", err)
 		}
 	}
-}
-
-// hasTransactionInfo checks if any keys have transaction information
-func (lv *LedgerView) hasTransactionInfo() bool {
-	for _, key := range lv.Keys {
-		if key.Transaction != "" || key.BlockNum > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func sortedKeys(m map[string]int) []string {

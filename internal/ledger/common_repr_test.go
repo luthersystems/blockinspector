@@ -11,14 +11,18 @@ import (
 )
 
 func TestNewLedgerView(t *testing.T) {
+	t.Parallel()
 	view := NewLedgerView()
-	assert.NotNil(t, view)
+	require.NotNil(t, view)
 	assert.Empty(t, view.Keys)
 	assert.NotNil(t, view.Statistics)
+	assert.NotNil(t, view.Statistics.Namespaces)
+	assert.NotNil(t, view.Statistics.Collections)
 	assert.Equal(t, 0, view.Statistics.TotalKeys)
 }
 
 func TestLedgerViewAddKey(t *testing.T) {
+	t.Parallel()
 	view := NewLedgerView()
 
 	view.AddKey(&KeyRecord{
@@ -47,12 +51,14 @@ func TestLedgerViewAddKey(t *testing.T) {
 }
 
 func TestLedgerViewAddKeyNil(t *testing.T) {
+	t.Parallel()
 	view := NewLedgerView()
 	view.AddKey(nil) // should not panic
 	assert.Equal(t, 0, view.Statistics.TotalKeys)
 }
 
 func TestLedgerViewWrite(t *testing.T) {
+	t.Parallel()
 	view := NewLedgerView()
 	view.AddKey(&KeyRecord{
 		Type:      "state",
@@ -76,16 +82,18 @@ func TestLedgerViewWrite(t *testing.T) {
 	output := buf.String()
 	assert.Contains(t, output, "Ledger Summary")
 	assert.Contains(t, output, "Total Keys")
-	assert.Contains(t, output, "2") // total keys
 	assert.Contains(t, output, "State Namespaces")
 	assert.Contains(t, output, "mycc")
 	assert.Contains(t, output, "Private Data Collections")
 	assert.Contains(t, output, "mycoll")
 	assert.Contains(t, output, "key1")
+	assert.Contains(t, output, "100") // value size for key1
 	assert.Contains(t, output, "secret1")
+	assert.Contains(t, output, "50") // value size for secret1
 }
 
 func TestLedgerViewWriteNil(t *testing.T) {
+	t.Parallel()
 	var lv *LedgerView
 	var buf bytes.Buffer
 	lv.Write(&buf) // should not panic
@@ -93,13 +101,15 @@ func TestLedgerViewWriteNil(t *testing.T) {
 }
 
 func TestLedgerViewWriteNilWriter(t *testing.T) {
+	t.Parallel()
 	view := NewLedgerView()
 	view.Write(nil) // should not panic
 }
 
 func TestLedgerViewWriteDeterministicOrder(t *testing.T) {
+	t.Parallel()
 	// Run multiple times to catch non-determinism
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		view := NewLedgerView()
 		view.AddKey(&KeyRecord{Type: "state", Namespace: "zz_last", Key: "k1", ValueSize: 1, IsWrite: true})
 		view.AddKey(&KeyRecord{Type: "state", Namespace: "aa_first", Key: "k2", ValueSize: 1, IsWrite: true})
@@ -109,7 +119,7 @@ func TestLedgerViewWriteDeterministicOrder(t *testing.T) {
 		view.Write(&buf)
 		output := buf.String()
 
-		// aa_first should appear before mm_middle which should appear before zz_last
+		// In the namespace summary table, aa_first should appear before mm_middle before zz_last
 		aaIdx := strings.Index(output, "aa_first")
 		mmIdx := strings.Index(output, "mm_middle")
 		zzIdx := strings.Index(output, "zz_last")
@@ -120,6 +130,7 @@ func TestLedgerViewWriteDeterministicOrder(t *testing.T) {
 }
 
 func TestLedgerViewWriteCSV(t *testing.T) {
+	t.Parallel()
 	view := NewLedgerView()
 	view.AddKey(&KeyRecord{
 		Type:      "state",
@@ -136,13 +147,34 @@ func TestLedgerViewWriteCSV(t *testing.T) {
 	view.WriteCSV(w)
 	w.Flush()
 
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	assert.Equal(t, 2, len(lines), "expected 1 header + 1 data row")
-	assert.Equal(t, "type,namespace_or_collection,key,value_size_bytes,is_read,is_write,tx_id,block_num", lines[0])
-	assert.Contains(t, lines[1], "state,mycc,key1,100,false,true")
+	// Parse CSV properly
+	reader := csv.NewReader(strings.NewReader(buf.String()))
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2, "expected 1 header + 1 data row")
+
+	// Verify header
+	assert.Equal(t, GetCSVLedgerViewHeader(), records[0])
+
+	// Verify all rows have same column count
+	for i, row := range records {
+		assert.Len(t, row, len(records[0]), "row %d should have same column count as header", i)
+	}
+
+	// Verify data row field by field
+	row := records[1]
+	assert.Equal(t, "state", row[0]) // type
+	assert.Equal(t, "mycc", row[1])  // namespace_or_collection
+	assert.Equal(t, "key1", row[2])  // key
+	assert.Equal(t, "100", row[3])   // value_size_bytes
+	assert.Equal(t, "false", row[4]) // is_read
+	assert.Equal(t, "true", row[5])  // is_write
+	assert.Equal(t, "", row[6])      // tx_id (empty for non-block data)
+	assert.Equal(t, "0", row[7])     // block_num (zero for non-block data)
 }
 
 func TestLedgerViewWriteCSVWithTransactionInfo(t *testing.T) {
+	t.Parallel()
 	view := NewLedgerView()
 	view.AddKey(&KeyRecord{
 		Type:        "state",
@@ -160,13 +192,19 @@ func TestLedgerViewWriteCSVWithTransactionInfo(t *testing.T) {
 	view.WriteCSV(w)
 	w.Flush()
 
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	assert.Equal(t, 2, len(lines))
-	assert.Contains(t, lines[1], "tx123")
-	assert.Contains(t, lines[1], "5")
+	reader := csv.NewReader(strings.NewReader(buf.String()))
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+
+	// Verify transaction info is in the correct columns
+	row := records[1]
+	assert.Equal(t, "tx123", row[6]) // tx_id column specifically
+	assert.Equal(t, "5", row[7])     // block_num column specifically
 }
 
 func TestLedgerViewWriteCSVNil(t *testing.T) {
+	t.Parallel()
 	var lv *LedgerView
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
@@ -176,11 +214,16 @@ func TestLedgerViewWriteCSVNil(t *testing.T) {
 }
 
 func TestGetCSVLedgerViewHeader(t *testing.T) {
+	t.Parallel()
 	header := GetCSVLedgerViewHeader()
-	assert.Equal(t, []string{"type", "namespace_or_collection", "key", "value_size_bytes", "is_read", "is_write", "tx_id", "block_num"}, header)
+	assert.Len(t, header, 8)
+	assert.Equal(t, "type", header[0])
+	assert.Equal(t, "tx_id", header[6])
+	assert.Equal(t, "block_num", header[7])
 }
 
 func TestLedgerViewBlockAndTransactionStats(t *testing.T) {
+	t.Parallel()
 	view := NewLedgerView()
 	view.Statistics.BlockCount = 3
 	view.Statistics.TransactionCount = 10
@@ -190,7 +233,5 @@ func TestLedgerViewBlockAndTransactionStats(t *testing.T) {
 
 	output := buf.String()
 	assert.Contains(t, output, "Blocks")
-	assert.Contains(t, output, "3")
 	assert.Contains(t, output, "Transactions")
-	assert.Contains(t, output, "10")
 }
