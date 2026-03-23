@@ -71,8 +71,8 @@ func TestLoadSnapshot(t *testing.T) {
 func TestLoadSnapshotSkipsMalformedKeys(t *testing.T) {
 	entries := map[string]string{
 		"state\x00mycc\x00key1": "value1",
-		"badkey":                "ignored",     // no null separators
-		"also\x00bad":          "also_ignored", // only one separator
+		"badkey":                "ignored",      // no null separators
+		"also\x00bad":           "also_ignored", // only one separator
 	}
 
 	buf := createTestSnapshot(t, entries)

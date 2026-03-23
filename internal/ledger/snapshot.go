@@ -208,4 +208,3 @@ func (s *SnapshotState) WriteCSV(w *csv.Writer) {
 	view := s.ToLedgerView()
 	view.WriteCSV(w)
 }
-
