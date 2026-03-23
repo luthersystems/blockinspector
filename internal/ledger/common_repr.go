@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/tw"
@@ -117,8 +118,8 @@ func (lv *LedgerView) Write(w io.Writer) {
 		table = tablewriter.NewWriter(w)
 		table.Header("Namespace", "Key Count")
 		table.Caption(tw.Caption{Text: "State Namespaces"})
-		for ns, count := range stats.Namespaces {
-			table.Append([]string{ns, fmt.Sprintf("%d", count)})
+		for _, ns := range sortedKeys(stats.Namespaces) {
+			table.Append([]string{ns, fmt.Sprintf("%d", stats.Namespaces[ns])})
 		}
 		table.Render()
 		fmt.Fprintln(w)
@@ -129,8 +130,8 @@ func (lv *LedgerView) Write(w io.Writer) {
 		table = tablewriter.NewWriter(w)
 		table.Header("Collection", "Key Count")
 		table.Caption(tw.Caption{Text: "Private Data Collections"})
-		for coll, count := range stats.Collections {
-			table.Append([]string{coll, fmt.Sprintf("%d", count)})
+		for _, coll := range sortedKeys(stats.Collections) {
+			table.Append([]string{coll, fmt.Sprintf("%d", stats.Collections[coll])})
 		}
 		table.Render()
 		fmt.Fprintln(w)
@@ -151,7 +152,8 @@ func (lv *LedgerView) Write(w io.Writer) {
 
 	// Write state keys
 	if stateKeys, ok := keysByNamespace["state"]; ok {
-		for namespace, keys := range stateKeys {
+		for _, namespace := range sortedMapKeys(stateKeys) {
+			keys := stateKeys[namespace]
 			table = tablewriter.NewWriter(w)
 			table.Header("Key", "Value Size (bytes)", "Read", "Write")
 			table.Caption(tw.Caption{Text: fmt.Sprintf("State Keys (namespace=[%s])", namespace)})
@@ -173,7 +175,8 @@ func (lv *LedgerView) Write(w io.Writer) {
 
 	// Write private keys
 	if privateKeys, ok := keysByNamespace["private"]; ok {
-		for collection, keys := range privateKeys {
+		for _, collection := range sortedMapKeys(privateKeys) {
+			keys := privateKeys[collection]
 			table = tablewriter.NewWriter(w)
 			table.Header("Key", "Value Size (bytes)")
 			table.Caption(tw.Caption{Text: fmt.Sprintf("Private Data Keys (collection=[%s])", collection)})
@@ -186,23 +189,13 @@ func (lv *LedgerView) Write(w io.Writer) {
 	}
 }
 
-// WriteCSV writes ledger view data in CSV format
+// WriteCSV writes ledger view data rows in CSV format.
+// The caller is responsible for writing the header row (see GetCSVLedgerViewHeader).
 func (lv *LedgerView) WriteCSV(w *csv.Writer) {
 	if lv == nil || w == nil {
 		return
 	}
 
-	// Write header
-	header := []string{"type", "namespace_or_collection", "key", "value_size_bytes", "is_read", "is_write"}
-	if lv.hasTransactionInfo() {
-		header = append(header, "tx_id", "block_num")
-	}
-	if err := w.Write(header); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write CSV header: %v\n", err)
-		return
-	}
-
-	// Write keys
 	for _, key := range lv.Keys {
 		row := []string{
 			key.Type,
@@ -231,7 +224,25 @@ func (lv *LedgerView) hasTransactionInfo() bool {
 	return false
 }
 
-// GetCSVHeader returns the CSV header for ledger view data
+func sortedKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedMapKeys(m map[string][]*KeyRecord) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// GetCSVLedgerViewHeader returns the CSV header for ledger view data
 func GetCSVLedgerViewHeader() []string {
 	return []string{"type", "namespace_or_collection", "key", "value_size_bytes", "is_read", "is_write", "tx_id", "block_num"}
 }

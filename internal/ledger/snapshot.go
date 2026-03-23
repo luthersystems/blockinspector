@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	badger "github.com/dgraph-io/badger/v4"
-	"github.com/olekukonko/tablewriter"
-	"github.com/olekukonko/tablewriter/tw"
 	"github.com/sirupsen/logrus"
 )
 
@@ -200,92 +198,6 @@ func (s *SnapshotState) Write(w io.Writer) {
 	view.Write(w)
 }
 
-// WriteLegacy writes the original snapshot format (kept for compatibility)
-func (s *SnapshotState) WriteLegacy(w io.Writer) {
-	if s == nil || w == nil {
-		return
-	}
-
-	stats := s.GetStats()
-
-	// Write summary statistics
-	table := tablewriter.NewWriter(w)
-	table.Header("Metric", "Value")
-	table.Caption(tw.Caption{Text: "Snapshot Summary"})
-	table.Append([]string{"Total State Keys", fmt.Sprintf("%d", stats.TotalStateKeys)})
-	table.Append([]string{"Total Private Keys", fmt.Sprintf("%d", stats.TotalPrivateKeys)})
-	table.Append([]string{"Total State Size (bytes)", fmt.Sprintf("%d", stats.TotalStateSize)})
-	table.Append([]string{"Total Private Size (bytes)", fmt.Sprintf("%d", stats.TotalPrivateSize)})
-	table.Render()
-	fmt.Fprintln(w)
-
-	// Write namespace statistics
-	if len(stats.Namespaces) > 0 {
-		table = tablewriter.NewWriter(w)
-		table.Header("Namespace", "Key Count")
-		table.Caption(tw.Caption{Text: "State Namespaces"})
-		for ns, count := range stats.Namespaces {
-			table.Append([]string{ns, fmt.Sprintf("%d", count)})
-		}
-		table.Render()
-		fmt.Fprintln(w)
-	}
-
-	// Write collection statistics
-	if len(stats.Collections) > 0 {
-		table = tablewriter.NewWriter(w)
-		table.Header("Collection", "Key Count")
-		table.Caption(tw.Caption{Text: "Private Data Collections"})
-		for coll, count := range stats.Collections {
-			table.Append([]string{coll, fmt.Sprintf("%d", count)})
-		}
-		table.Render()
-		fmt.Fprintln(w)
-	}
-
-	// Write state keys grouped by namespace
-	if len(s.StateKeys) > 0 {
-		// Group keys by namespace
-		keysByNamespace := make(map[string][]*StateKey)
-		for _, stateKey := range s.StateKeys {
-			keysByNamespace[stateKey.Namespace] = append(keysByNamespace[stateKey.Namespace], stateKey)
-		}
-
-		// Write each namespace group
-		for namespace, keys := range keysByNamespace {
-			table = tablewriter.NewWriter(w)
-			table.Header("Key", "Value Size (bytes)")
-			table.Caption(tw.Caption{Text: fmt.Sprintf("State Keys (namespace=[%s])", namespace)})
-			for _, stateKey := range keys {
-				table.Append([]string{stateKey.Key, fmt.Sprintf("%d", len(stateKey.Value))})
-			}
-			table.Render()
-			fmt.Fprintln(w)
-		}
-	}
-
-	// Write private keys grouped by collection
-	if len(s.PrivateKeys) > 0 {
-		// Group keys by collection
-		keysByCollection := make(map[string][]*PrivateKey)
-		for _, privateKey := range s.PrivateKeys {
-			keysByCollection[privateKey.Collection] = append(keysByCollection[privateKey.Collection], privateKey)
-		}
-
-		// Write each collection group
-		for collection, keys := range keysByCollection {
-			table = tablewriter.NewWriter(w)
-			table.Header("Key", "Value Size (bytes)")
-			table.Caption(tw.Caption{Text: fmt.Sprintf("Private Data Keys (collection=[%s])", collection)})
-			for _, privateKey := range keys {
-				table.Append([]string{privateKey.Key, fmt.Sprintf("%d", len(privateKey.Value))})
-			}
-			table.Render()
-			fmt.Fprintln(w)
-		}
-	}
-}
-
 // WriteCSV writes snapshot data in CSV format
 func (s *SnapshotState) WriteCSV(w *csv.Writer) {
 	if s == nil || w == nil {
@@ -297,45 +209,3 @@ func (s *SnapshotState) WriteCSV(w *csv.Writer) {
 	view.WriteCSV(w)
 }
 
-// GetCSVHeader returns the CSV header for snapshot data
-func GetCSVSnapshotHeader() []string {
-	return []string{"type", "namespace_or_collection", "key", "value_size_bytes"}
-}
-
-// SnapshotIterator provides an iterator interface for snapshot keys
-type SnapshotIterator struct {
-	stateKeys   []*StateKey
-	privateKeys []*PrivateKey
-	stateIdx    int
-	privateIdx  int
-}
-
-// Next returns the next key-value pair, alternating between state and private keys
-func (it *SnapshotIterator) Next() (*StateKey, *PrivateKey) {
-	if it.stateIdx < len(it.stateKeys) {
-		key := it.stateKeys[it.stateIdx]
-		it.stateIdx++
-		return key, nil
-	}
-	if it.privateIdx < len(it.privateKeys) {
-		key := it.privateKeys[it.privateIdx]
-		it.privateIdx++
-		return nil, key
-	}
-	return nil, nil
-}
-
-// HasNext returns true if there are more keys
-func (it *SnapshotIterator) HasNext() bool {
-	return it.stateIdx < len(it.stateKeys) || it.privateIdx < len(it.privateKeys)
-}
-
-// NewSnapshotIterator creates a new iterator for the snapshot
-func (s *SnapshotState) NewSnapshotIterator() *SnapshotIterator {
-	return &SnapshotIterator{
-		stateKeys:   s.StateKeys,
-		privateKeys: s.PrivateKeys,
-		stateIdx:    0,
-		privateIdx:  0,
-	}
-}
