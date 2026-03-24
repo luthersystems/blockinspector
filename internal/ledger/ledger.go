@@ -6,10 +6,9 @@ import (
 	"strings"
 
 	"github.com/hyperledger/fabric-protos-go/common"
-	cledger "github.com/hyperledger/fabric/common/ledger"
-	"github.com/hyperledger/fabric/common/ledger/blkstorage"
-	"github.com/hyperledger/fabric/common/ledger/blkstorage/fsblkstorage"
-	"github.com/hyperledger/fabric/common/metrics/disabled"
+	"github.com/luthersystems/blockinspector/internal/blkstorage"
+	"github.com/luthersystems/blockinspector/internal/blkstorage/fsblkstorage"
+	"github.com/luthersystems/blockinspector/internal/fabricmetrics/disabled"
 )
 
 const (
@@ -128,7 +127,7 @@ type BlockIterator interface {
 type ledgerBlockIterator struct {
 	start uint64
 	end   uint64
-	iter  cledger.ResultsIterator
+	iter  blkstorage.ResultsIterator
 }
 
 // Next returns the next block, or nil if there are no more blocks.
