@@ -597,6 +597,135 @@ func TestPrivateDataKeyEntryDiscovery(t *testing.T) {
 	assert.Len(t, collections, 3)
 }
 
+// --- Integration tests against real Fabric ledger data ---
+
+const (
+	// RealStateLevelDBDir points to a real stateLeveldb extracted from a
+	// Fabric peer running the substrate sample-network e2e tests.
+	// Channel: "luther", collections: "private", "_implicit_org_Org1MSP"
+	RealStateLevelDBDir = TestDataDir + "sample_prod/ledgersData/stateLeveldb"
+	RealStateDBChannel  = "luther"
+)
+
+func TestReadPrivateDataKeysRealLedger(t *testing.T) {
+	t.Parallel()
+	if _, err := os.Stat(RealStateLevelDBDir); os.IsNotExist(err) {
+		t.Skip("real stateLeveldb fixture not available")
+	}
+
+	db, err := OpenStateLevelDB(RealStateLevelDBDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Read all private data keys
+	entries, err := ReadPrivateDataKeys(db, RealStateDBChannel, PvtDataKeysOptions{
+		SortByVersion: true,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, entries, "expected private data keys in real ledger")
+
+	// Should find at least the "private" collection with pkey:1 and pkey:2
+	privateEntries := make([]*PrivateDataKeyEntry, 0)
+	for _, e := range entries {
+		if e.Collection == "private" {
+			privateEntries = append(privateEntries, e)
+		}
+	}
+	require.GreaterOrEqual(t, len(privateEntries), 2, "expected at least 2 keys in 'private' collection")
+
+	// Verify pkey:1 and pkey:2 exist
+	keyNames := make(map[string]bool)
+	for _, e := range privateEntries {
+		keyNames[e.Key] = true
+	}
+	assert.True(t, keyNames["pkey:1"], "expected pkey:1 in private collection")
+	assert.True(t, keyNames["pkey:2"], "expected pkey:2 in private collection")
+
+	// All entries should have valid block numbers (> 0 for non-genesis)
+	for _, e := range entries {
+		assert.Greater(t, e.BlockNum, uint64(0), "block number should be > 0 for key %s", e.Key)
+	}
+
+	t.Logf("Found %d private data keys across all collections", len(entries))
+	for _, e := range entries {
+		t.Logf("  collection=%s key=%s block=%d tx=%d size=%d",
+			e.Collection, e.Key, e.BlockNum, e.TxNum, e.ValueSize)
+	}
+}
+
+func TestReadPrivateDataKeysRealLedgerFilterCollection(t *testing.T) {
+	t.Parallel()
+	if _, err := os.Stat(RealStateLevelDBDir); os.IsNotExist(err) {
+		t.Skip("real stateLeveldb fixture not available")
+	}
+
+	db, err := OpenStateLevelDB(RealStateLevelDBDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	entries, err := ReadPrivateDataKeys(db, RealStateDBChannel, PvtDataKeysOptions{
+		Collection:    "private",
+		SortByVersion: true,
+	})
+	require.NoError(t, err)
+
+	for _, e := range entries {
+		assert.Equal(t, "private", e.Collection, "filter should only return 'private' collection")
+	}
+	require.GreaterOrEqual(t, len(entries), 2)
+}
+
+func TestReadPrivateDataKeysRealLedgerSortAndLimit(t *testing.T) {
+	t.Parallel()
+	if _, err := os.Stat(RealStateLevelDBDir); os.IsNotExist(err) {
+		t.Skip("real stateLeveldb fixture not available")
+	}
+
+	db, err := OpenStateLevelDB(RealStateLevelDBDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Get just the earliest entry
+	entries, err := ReadPrivateDataKeys(db, RealStateDBChannel, PvtDataKeysOptions{
+		SortByVersion: true,
+		Limit:         1,
+	})
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "limit=1 should return exactly 1 result")
+
+	earliest := entries[0]
+	t.Logf("Earliest PDC key: collection=%s key=%s block=%d tx=%d",
+		earliest.Collection, earliest.Key, earliest.BlockNum, earliest.TxNum)
+
+	// The earliest should be from the _implicit_org collection (lifecycle, block 3)
+	// or the private collection — either way block number should be small
+	assert.LessOrEqual(t, earliest.BlockNum, uint64(20), "earliest block should be a low number")
+}
+
+func TestReadPrivateDataKeysRealLedgerDiscoversPDCs(t *testing.T) {
+	t.Parallel()
+	if _, err := os.Stat(RealStateLevelDBDir); os.IsNotExist(err) {
+		t.Skip("real stateLeveldb fixture not available")
+	}
+
+	db, err := OpenStateLevelDB(RealStateLevelDBDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	entries, err := ReadPrivateDataKeys(db, RealStateDBChannel, PvtDataKeysOptions{})
+	require.NoError(t, err)
+
+	// Discover all unique collections
+	collections := make(map[string]bool)
+	for _, e := range entries {
+		collections[e.Collection] = true
+	}
+
+	assert.True(t, collections["private"], "should discover 'private' collection")
+	assert.True(t, collections["_implicit_org_Org1MSP"], "should discover implicit org collection")
+	t.Logf("Discovered %d PDCs: %v", len(collections), collections)
+}
+
 func init() {
 	// Suppress log output during tests
 	_ = os.Setenv("FABRIC_LOGGING_SPEC", "error")
