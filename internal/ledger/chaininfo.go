@@ -14,7 +14,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
 	"github.com/hyperledger/fabric-protos-go/ledger/rwset/kvrwset"
 	fabricpeer "github.com/hyperledger/fabric-protos-go/peer"
-	fabricprotoutil "github.com/hyperledger/fabric/protoutil"
+	"github.com/luthersystems/blockinspector/internal/protoutil"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/tw"
 	pkgerrors "github.com/pkg/errors"
@@ -127,6 +127,63 @@ func (b *Block) WriteCSV(w *csv.Writer) {
 			fmt.Fprintf(os.Stderr, "Failed to write csv row [%d]: %v\n", b.blockNum, err)
 		}
 	}
+}
+
+// ToLedgerView converts a Block to a LedgerView
+func (b *Block) ToLedgerView() *LedgerView {
+	if b == nil {
+		return NewLedgerView()
+	}
+
+	view := NewLedgerView()
+	view.Statistics.BlockCount = 1
+	view.Statistics.TransactionCount = len(b.transactions)
+
+	for _, tx := range b.transactions {
+		details := tx.GetDetails()
+		if details == nil {
+			continue
+		}
+
+		for _, nsRWSet := range details.GetNamespaceReadWriteSet() {
+			if nsRWSet.GetNamespace() == "_lifecycle" && skipLifecycleRWSet {
+				continue
+			}
+			rwSet := nsRWSet.GetReadWriteSet()
+
+			// Add read set keys
+			for _, record := range rwSet.GetReadSet() {
+				view.AddKey(&KeyRecord{
+					Type:        "state",
+					Namespace:   nsRWSet.GetNamespace(),
+					Key:         record.GetKey(),
+					ValueSize:   0, // read sets don't have values
+					Version:     record.GetVersion(),
+					IsRead:      true,
+					IsWrite:     false,
+					Transaction: string(tx.GetID()),
+					BlockNum:    b.blockNum,
+				})
+			}
+
+			// Add write set keys
+			for _, record := range rwSet.GetWriteSet() {
+				view.AddKey(&KeyRecord{
+					Type:        "state",
+					Namespace:   nsRWSet.GetNamespace(),
+					Key:         record.GetKey(),
+					Value:       record.GetVal(),
+					ValueSize:   len(record.GetVal()),
+					IsRead:      false,
+					IsWrite:     true,
+					Transaction: string(tx.GetID()),
+					BlockNum:    b.blockNum,
+				})
+			}
+		}
+	}
+
+	return view
 }
 
 func (b *Block) Write(w io.Writer) {
@@ -562,7 +619,7 @@ func getAction(txBytes []byte) (*fabricpeer.ChaincodeAction, error) {
 	if len(txBytes) == 0 {
 		return nil, nil
 	}
-	tx, err := fabricprotoutil.UnmarshalTransaction(txBytes)
+	tx, err := protoutil.UnmarshalTransaction(txBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -574,18 +631,18 @@ func getAction(txBytes []byte) (*fabricpeer.ChaincodeAction, error) {
 
 	action := actions[0]
 
-	chaincodeActionPayload, err := fabricprotoutil.UnmarshalChaincodeActionPayload(action.GetPayload())
+	chaincodeActionPayload, err := protoutil.UnmarshalChaincodeActionPayload(action.GetPayload())
 	if err != nil {
 		return nil, err
 	}
 
-	proposalResponse, err := fabricprotoutil.UnmarshalProposalResponsePayload(chaincodeActionPayload.GetAction().GetProposalResponsePayload())
+	proposalResponse, err := protoutil.UnmarshalProposalResponsePayload(chaincodeActionPayload.GetAction().GetProposalResponsePayload())
 	if err != nil {
 		logrus.WithError(err).Info("invalid proposal response")
 		return nil, nil
 	}
 
-	chaincodeAction, err := fabricprotoutil.UnmarshalChaincodeAction(proposalResponse.GetExtension())
+	chaincodeAction, err := protoutil.UnmarshalChaincodeAction(proposalResponse.GetExtension())
 	if err != nil {
 		return nil, err
 	}
@@ -597,7 +654,7 @@ func getEvent(eventBytes []byte) (*Event, error) {
 	if len(eventBytes) == 0 {
 		return nil, nil
 	}
-	event, err := fabricprotoutil.UnmarshalChaincodeEvents(eventBytes)
+	event, err := protoutil.UnmarshalChaincodeEvents(eventBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -672,12 +729,12 @@ func getPayload(envelopeBytes []byte) (*cb.Payload, error) {
 		return nil, fmt.Errorf("empty envelope")
 	}
 
-	envelope, err := fabricprotoutil.UnmarshalEnvelope(envelopeBytes)
+	envelope, err := protoutil.UnmarshalEnvelope(envelopeBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	payload, err := fabricprotoutil.UnmarshalPayload(envelope.GetPayload())
+	payload, err := protoutil.UnmarshalPayload(envelope.GetPayload())
 	if err != nil {
 		return nil, err
 	}
@@ -686,7 +743,7 @@ func getPayload(envelopeBytes []byte) (*cb.Payload, error) {
 }
 
 func getTransactionID(chanHeaderBytes []byte) (TransactionID, error) {
-	channelheader, err := fabricprotoutil.UnmarshalChannelHeader(chanHeaderBytes)
+	channelheader, err := protoutil.UnmarshalChannelHeader(chanHeaderBytes)
 	if err != nil {
 		return "", err
 	} else {

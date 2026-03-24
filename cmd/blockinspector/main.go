@@ -18,9 +18,15 @@ type Range struct {
 	OutputCSV bool   `optional:"" name:"output-csv" help:"Flag to output in CSV format to stdout."`
 }
 
+type Snapshot struct {
+	SnapshotFile string `arg:"" required:"" placeholder:"SNAPSHOTFILE" help:"Path to Luther snapshot file (Badger DB backup)."`
+	OutputCSV    bool   `optional:"" name:"output-csv" help:"Flag to output in CSV format to stdout."`
+}
+
 var CLI struct {
-	RangePeer    Range `cmd:"" help:"Range blocks on peer ledger."`
-	RangeOrderer Range `cmd:"" help:"Range blocks on orderer ledger."`
+	RangePeer    Range    `cmd:"" help:"Range blocks on peer ledger."`
+	RangeOrderer Range    `cmd:"" help:"Range blocks on orderer ledger."`
+	Snapshot     Snapshot `cmd:"" help:"Inspect Luther snapshot ledger (Badger DB backup)."`
 }
 
 func rangeBlock(orderer bool, dir string, channel string, start uint64, end uint64, outputCSV bool) {
@@ -58,13 +64,39 @@ func rangeBlock(orderer bool, dir string, channel string, start uint64, end uint
 	}
 }
 
+func inspectSnapshot(snapshotFile string, outputCSV bool) {
+	snapshot, err := ledger.LoadSnapshotFromFile(snapshotFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load snapshot: %v\n", err)
+		os.Exit(1)
+	}
+
+	var csvWriter *csv.Writer
+	if outputCSV {
+		csvWriter = csv.NewWriter(os.Stdout)
+		defer csvWriter.Flush()
+
+		if err := csvWriter.Write(ledger.GetCSVLedgerViewHeader()); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write header: %v\n", err)
+		}
+	}
+
+	if csvWriter != nil {
+		snapshot.WriteCSV(csvWriter)
+	} else {
+		snapshot.Write(os.Stdout)
+	}
+}
+
 func main() {
 	ctx := kong.Parse(&CLI)
 	switch ctx.Command() {
 	case "range-peer <ledger-dir> <channel> <start> <end>":
 		rangeBlock(false, CLI.RangePeer.LedgerDir, CLI.RangePeer.Channel, CLI.RangePeer.Start, CLI.RangePeer.End, CLI.RangePeer.OutputCSV)
 	case "range-orderer <ledger-dir> <channel> <start> <end>":
-		rangeBlock(true, CLI.RangeOrderer.LedgerDir, CLI.RangeOrderer.Channel, CLI.RangeOrderer.Start, CLI.RangeOrderer.End, CLI.RangePeer.OutputCSV)
+		rangeBlock(true, CLI.RangeOrderer.LedgerDir, CLI.RangeOrderer.Channel, CLI.RangeOrderer.Start, CLI.RangeOrderer.End, CLI.RangeOrderer.OutputCSV)
+	case "snapshot <snapshot-file>":
+		inspectSnapshot(CLI.Snapshot.SnapshotFile, CLI.Snapshot.OutputCSV)
 	default:
 		fmt.Println(ctx.Command())
 	}
