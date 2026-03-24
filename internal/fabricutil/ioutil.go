@@ -6,6 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 
 package fabricutil
 
+// Copied from github.com/hyperledger/fabric@v2.1.1 common/ledger/util/ioutil.go
+
 import (
 	"io"
 	"io/ioutil"

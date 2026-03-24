@@ -6,6 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 
 package leveldbhelper
 
+// Copied from github.com/hyperledger/fabric@v2.1.1 common/ledger/util/leveldbhelper/leveldb_helper.go
+
 import (
 	"fmt"
 	"sync"

@@ -6,6 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 
 package fabricmetrics
 
+// Copied from github.com/hyperledger/fabric@v2.1.1 common/metrics/provider.go
+
 // A Provider is an abstraction for a metrics provider. It is a factory for
 // Counter, Gauge, and Histogram meters.
 type Provider interface {

@@ -16,6 +16,8 @@ limitations under the License.
 
 package fabricutil
 
+// Copied from github.com/hyperledger/fabric@v2.1.1 common/ledger/util/util.go
+
 import (
 	"encoding/binary"
 	"fmt"

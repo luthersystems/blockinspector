@@ -6,6 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 
 package fsblkstorage
 
+// Copied from github.com/hyperledger/fabric@v2.1.1 common/ledger/blkstorage/fsblkstorage/blockfile_mgr.go
+
 import (
 	"bytes"
 	"fmt"

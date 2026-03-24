@@ -3,6 +3,8 @@
 
 package msgs
 
+// Copied from github.com/hyperledger/fabric@v2.1.1 common/ledger/blkstorage/fsblkstorage/msgs/storage.pb.go
+
 import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"

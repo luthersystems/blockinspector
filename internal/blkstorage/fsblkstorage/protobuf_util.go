@@ -16,6 +16,8 @@ limitations under the License.
 
 package fsblkstorage
 
+// Copied from github.com/hyperledger/fabric@v2.1.1 common/ledger/blkstorage/fsblkstorage/protobuf_util.go
+
 import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"

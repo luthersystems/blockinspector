@@ -6,6 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 
 package disabled
 
+// Copied from github.com/hyperledger/fabric@v2.1.1 common/metrics/disabled/provider.go
+
 import (
 	"github.com/luthersystems/blockinspector/internal/fabricmetrics"
 )
