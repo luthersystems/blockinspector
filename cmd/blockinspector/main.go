@@ -23,10 +23,20 @@ type Snapshot struct {
 	OutputCSV    bool   `optional:"" name:"output-csv" help:"Flag to output in CSV format to stdout."`
 }
 
+type PvtdataKeys struct {
+	LedgerPath    string `arg:"" required:"" placeholder:"LEDGERPATH" help:"Path to peer ledger data (e.g., /var/hyperledger/production)."`
+	Channel       string `arg:"" required:"" placeholder:"CHANNEL" help:"Channel name."`
+	Collection    string `optional:"" name:"collection" help:"Filter by collection name."`
+	SortByVersion bool   `optional:"" name:"sort-by-version" help:"Sort by version (block number) ascending."`
+	Limit         int    `optional:"" name:"limit" default:"0" help:"Limit output to N results (0 = all)."`
+	OutputCSV     bool   `optional:"" name:"output-csv" help:"Flag to output in CSV format to stdout."`
+}
+
 var CLI struct {
-	RangePeer    Range    `cmd:"" help:"Range blocks on peer ledger."`
-	RangeOrderer Range    `cmd:"" help:"Range blocks on orderer ledger."`
-	Snapshot     Snapshot `cmd:"" help:"Inspect Luther snapshot ledger (Badger DB backup)."`
+	RangePeer    Range       `cmd:"" help:"Range blocks on peer ledger."`
+	RangeOrderer Range       `cmd:"" help:"Range blocks on orderer ledger."`
+	Snapshot     Snapshot    `cmd:"" help:"Inspect Luther snapshot ledger (Badger DB backup)."`
+	PvtdataKeys  PvtdataKeys `cmd:"" name:"pvtdata-keys" help:"List private data collection keys with version info from peer state DB."`
 }
 
 func rangeBlock(orderer bool, dir string, channel string, start uint64, end uint64, outputCSV bool) {
@@ -88,6 +98,37 @@ func inspectSnapshot(snapshotFile string, outputCSV bool) {
 	}
 }
 
+func inspectPvtdataKeys(cmd PvtdataKeys) {
+	dbPath := ledger.StateLevelDBPath(cmd.LedgerPath)
+	db, err := ledger.OpenStateLevelDB(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open state DB: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	entries, err := ledger.ReadPrivateDataKeys(db, cmd.Channel, ledger.PvtDataKeysOptions{
+		Collection:    cmd.Collection,
+		SortByVersion: cmd.SortByVersion,
+		Limit:         cmd.Limit,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to read private data keys: %v\n", err)
+		os.Exit(1)
+	}
+
+	if cmd.OutputCSV {
+		w := csv.NewWriter(os.Stdout)
+		defer w.Flush()
+		if err := w.Write(ledger.GetCSVPvtDataKeysHeader()); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write header: %v\n", err)
+		}
+		ledger.WritePvtDataKeysCSV(w, entries)
+	} else {
+		ledger.WritePvtDataKeysTable(os.Stdout, entries)
+	}
+}
+
 func main() {
 	ctx := kong.Parse(&CLI)
 	switch ctx.Command() {
@@ -97,6 +138,8 @@ func main() {
 		rangeBlock(true, CLI.RangeOrderer.LedgerDir, CLI.RangeOrderer.Channel, CLI.RangeOrderer.Start, CLI.RangeOrderer.End, CLI.RangeOrderer.OutputCSV)
 	case "snapshot <snapshot-file>":
 		inspectSnapshot(CLI.Snapshot.SnapshotFile, CLI.Snapshot.OutputCSV)
+	case "pvtdata-keys <ledger-path> <channel>":
+		inspectPvtdataKeys(CLI.PvtdataKeys)
 	default:
 		fmt.Println(ctx.Command())
 	}

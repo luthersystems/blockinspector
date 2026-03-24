@@ -80,6 +80,26 @@ The snapshot inspector shows:
 - All state keys grouped by namespace
 - All private data keys grouped by collection
 
+### List Private Data Keys
+
+```bash
+blockinspector pvtdata-keys <LEDGERPATH> <CHANNEL> [--collection NAME] [--sort-by-version] [--limit N] [--output-csv]
+```
+
+Example — find the earliest private data key across all collections:
+```bash
+blockinspector pvtdata-keys /var/hyperledger/production mychannel --sort-by-version --limit 1
+```
+
+Example — list all keys in a specific collection:
+```bash
+blockinspector pvtdata-keys /var/hyperledger/production mychannel --collection private --sort-by-version
+```
+
+This command reads the peer's LevelDB state database offline and lists private data collection keys with their version (block number, transaction number). This is useful for discovering the oldest private data key after a snapshot restore, to verify that gossip-based private data reconciliation has completed.
+
+**Important**: The peer process must be stopped before running this command, as LevelDB holds a file lock.
+
 ### Parameters
 
 - `LEDGERDIR`: Directory containing ledger data (for peers: `ledgersData/chains`, for orderers: `orderer/chains`)
@@ -87,6 +107,7 @@ The snapshot inspector shows:
 - `START`: Start block number (inclusive)
 - `END`: End block number (exclusive). Use `0` to iterate through all blocks
 - `SNAPSHOTFILE`: Path to a Luther snapshot file (Badger DB backup format)
+- `LEDGERPATH`: Path to the peer's ledger data directory (e.g., `/var/hyperledger/production`)
 
 ### Output Formats
 
