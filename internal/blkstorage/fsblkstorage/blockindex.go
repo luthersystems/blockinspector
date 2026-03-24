@@ -172,7 +172,9 @@ func (index *blockIndex) getBlockLocByHash(blockHash []byte) (*fileLocPointer, e
 		return nil, blkstorage.ErrNotFoundInIndex
 	}
 	blkLoc := &fileLocPointer{}
-	blkLoc.unmarshal(b)
+	if err := blkLoc.unmarshal(b); err != nil {
+		return nil, err
+	}
 	return blkLoc, nil
 }
 
@@ -188,7 +190,9 @@ func (index *blockIndex) getBlockLocByBlockNum(blockNum uint64) (*fileLocPointer
 		return nil, blkstorage.ErrNotFoundInIndex
 	}
 	blkLoc := &fileLocPointer{}
-	blkLoc.unmarshal(b)
+	if err := blkLoc.unmarshal(b); err != nil {
+		return nil, err
+	}
 	return blkLoc, nil
 }
 
@@ -259,7 +263,9 @@ func (index *blockIndex) getTXLocByBlockNumTranNum(blockNum uint64, tranNum uint
 		return nil, blkstorage.ErrNotFoundInIndex
 	}
 	txFLP := &fileLocPointer{}
-	txFLP.unmarshal(b)
+	if err := txFLP.unmarshal(b); err != nil {
+		return nil, err
+	}
 	return txFLP, nil
 }
 
