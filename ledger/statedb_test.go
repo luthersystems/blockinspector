@@ -603,7 +603,7 @@ const (
 	// RealStateLevelDBDir points to a real stateLeveldb extracted from a
 	// Fabric peer running the substrate sample-network e2e tests.
 	// Channel: "luther", collections: "private", "_implicit_org_Org1MSP"
-	RealStateLevelDBDir = TestDataDir + "sample_prod/ledgersData/stateLeveldb"
+	RealStateLevelDBDir = "../internal/testdata/sample_prod/ledgersData/stateLeveldb"
 	RealStateDBChannel  = "luther"
 )
 
