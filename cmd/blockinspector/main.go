@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/luthersystems/blockinspector/internal/ledger"
+	internalledger "github.com/luthersystems/blockinspector/internal/ledger"
+	"github.com/luthersystems/blockinspector/ledger"
 
 	"github.com/alecthomas/kong"
 )
@@ -40,7 +41,7 @@ var CLI struct {
 }
 
 func rangeBlock(orderer bool, dir string, channel string, start uint64, end uint64, outputCSV bool) {
-	iter, err := ledger.RangeBlocks(dir, orderer, channel, start, end)
+	iter, err := internalledger.RangeBlocks(dir, orderer, channel, start, end)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to range: %v\n", err)
 		os.Exit(1)
@@ -51,7 +52,7 @@ func rangeBlock(orderer bool, dir string, channel string, start uint64, end uint
 		csvWriter = csv.NewWriter(os.Stdout)
 		defer csvWriter.Flush()
 
-		if err := csvWriter.Write(ledger.GetCSVBlockHeader()); err != nil {
+		if err := csvWriter.Write(internalledger.GetCSVBlockHeader()); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write header: %v\n", err)
 		}
 	}
@@ -75,7 +76,7 @@ func rangeBlock(orderer bool, dir string, channel string, start uint64, end uint
 }
 
 func inspectSnapshot(snapshotFile string, outputCSV bool) {
-	snapshot, err := ledger.LoadSnapshotFromFile(snapshotFile)
+	snapshot, err := internalledger.LoadSnapshotFromFile(snapshotFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load snapshot: %v\n", err)
 		os.Exit(1)
@@ -86,7 +87,7 @@ func inspectSnapshot(snapshotFile string, outputCSV bool) {
 		csvWriter = csv.NewWriter(os.Stdout)
 		defer csvWriter.Flush()
 
-		if err := csvWriter.Write(ledger.GetCSVLedgerViewHeader()); err != nil {
+		if err := csvWriter.Write(internalledger.GetCSVLedgerViewHeader()); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write header: %v\n", err)
 		}
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	TestDataDir         = "../testdata/"
+	TestDataDir         = "../../testdata/"
 	SampleGoodLedgerDir = TestDataDir + "sample_prod/"
 )
 

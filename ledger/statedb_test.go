@@ -167,6 +167,7 @@ func TestReadPrivateDataKeys(t *testing.T) {
 
 	// Verify no public, hashed, or wrong-channel entries
 	for _, e := range entries {
+		assert.Equal(t, "mycc", e.Chaincode, "all entries should have correct chaincode")
 		assert.NotEqual(t, "publickey", e.Key)
 		assert.NotEqual(t, "hashedkey", e.Key)
 		assert.NotEqual(t, "otherkey", e.Key)
@@ -237,6 +238,29 @@ func TestReadPrivateDataKeysSortByVersionWithLimit(t *testing.T) {
 	// Should be the 2 earliest: block 1 and block 13
 	assert.Equal(t, uint64(1), entries[0].BlockNum)
 	assert.Equal(t, uint64(13), entries[1].BlockNum)
+}
+
+func TestReadPrivateDataKeysUnsortedWithLimit(t *testing.T) {
+	t.Parallel()
+	db := createTestLevelDB(t, map[string]testEntry{
+		"ch/cc$$pcoll/key_a": {blockNum: 100, txNum: 0, value: []byte("v")},
+		"ch/cc$$pcoll/key_b": {blockNum: 13, txNum: 0, value: []byte("v")},
+		"ch/cc$$pcoll/key_c": {blockNum: 50, txNum: 0, value: []byte("v")},
+		"ch/cc$$pcoll/key_d": {blockNum: 1, txNum: 0, value: []byte("v")},
+	})
+	defer db.Close()
+
+	entries, err := ReadPrivateDataKeys(db, "ch", PvtDataKeysOptions{
+		Limit: 2,
+	})
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "unsorted limit should return exactly 2 results")
+
+	// Unsorted limit returns first N encountered (iteration order), not N smallest
+	for _, e := range entries {
+		assert.Equal(t, "cc", e.Chaincode)
+		assert.Equal(t, "coll", e.Collection)
+	}
 }
 
 func TestReadPrivateDataKeysEmpty(t *testing.T) {
@@ -603,7 +627,7 @@ const (
 	// RealStateLevelDBDir points to a real stateLeveldb extracted from a
 	// Fabric peer running the substrate sample-network e2e tests.
 	// Channel: "luther", collections: "private", "_implicit_org_Org1MSP"
-	RealStateLevelDBDir = TestDataDir + "sample_prod/ledgersData/stateLeveldb"
+	RealStateLevelDBDir = "../testdata/sample_prod/ledgersData/stateLeveldb"
 	RealStateDBChannel  = "luther"
 )
 
