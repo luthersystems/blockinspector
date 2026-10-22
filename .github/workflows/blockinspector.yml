@@ -9,9 +9,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container:
-      image: golang:1.25
     steps:
       - uses: actions/checkout@v5
+      # go.mod's toolchain line is the one statement of the Go version, so CI
+      # builds with the same Go that `go install` uses.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
       - name: Run CI tests
         run: make citest
