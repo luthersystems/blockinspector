@@ -77,7 +77,7 @@ func TestLedgerViewWrite(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	view.Write(&buf)
+	require.NoError(t, view.Write(&buf))
 
 	output := buf.String()
 	assert.Contains(t, output, "Ledger Summary")
@@ -96,14 +96,14 @@ func TestLedgerViewWriteNil(t *testing.T) {
 	t.Parallel()
 	var lv *LedgerView
 	var buf bytes.Buffer
-	lv.Write(&buf) // should not panic
+	require.NoError(t, lv.Write(&buf)) // should not panic
 	assert.Empty(t, buf.String())
 }
 
 func TestLedgerViewWriteNilWriter(t *testing.T) {
 	t.Parallel()
 	view := NewLedgerView()
-	view.Write(nil) // should not panic
+	require.NoError(t, view.Write(nil)) // should not panic
 }
 
 func TestLedgerViewWriteDeterministicOrder(t *testing.T) {
@@ -116,7 +116,7 @@ func TestLedgerViewWriteDeterministicOrder(t *testing.T) {
 		view.AddKey(&KeyRecord{Type: "state", Namespace: "mm_middle", Key: "k3", ValueSize: 1, IsWrite: true})
 
 		var buf bytes.Buffer
-		view.Write(&buf)
+		require.NoError(t, view.Write(&buf))
 		output := buf.String()
 
 		// In the namespace summary table, aa_first should appear before mm_middle before zz_last
@@ -229,7 +229,7 @@ func TestLedgerViewBlockAndTransactionStats(t *testing.T) {
 	view.Statistics.TransactionCount = 10
 
 	var buf bytes.Buffer
-	view.Write(&buf)
+	require.NoError(t, view.Write(&buf))
 
 	output := buf.String()
 	assert.Contains(t, output, "Blocks")

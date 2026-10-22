@@ -278,10 +278,14 @@ func (s *simpleBlockIterator) Close() {
 	if s.iter == nil {
 		return
 	}
-	s.iter = nil
+	// Close before clearing the field: the old order set s.iter to nil
+	// first and then called Close on the nil iterator.
 	s.iter.Close()
-	s.ledger.Close()
-	s.blockStore.Close()
+	s.iter = nil
+	// Close only fails when already closed, and this iterator owns both,
+	// so there is nothing to report.
+	_ = s.ledger.Close()
+	_ = s.blockStore.Close()
 }
 
 func (s *simpleBlockIterator) Next() (*CommonBlock, error) {
@@ -308,20 +312,20 @@ func RangeBlocks(ledgerDir string, orderer bool, channel string, start uint64, e
 
 	ledger, err := blockStore.NewLedger(channel)
 	if err != nil {
-		blockStore.Close()
+		_ = blockStore.Close() // cleanup after err; err is the one to report
 		return nil, err
 	}
 
 	err = ledger.Open()
 	if err != nil {
-		blockStore.Close()
+		_ = blockStore.Close() // cleanup after err; err is the one to report
 		return nil, err
 	}
 
 	iter, err := ledger.RangeBlocks(0, 0)
 	if err != nil {
-		ledger.Close()
-		blockStore.Close()
+		_ = ledger.Close() // cleanup after err; err is the one to report
+		_ = blockStore.Close()
 		return nil, err
 	}
 

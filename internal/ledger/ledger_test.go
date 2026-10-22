@@ -77,7 +77,7 @@ func TestRangeBlocks(t *testing.T) {
 		if block == nil {
 			break
 		}
-		block.Write(os.Stderr)
+		require.NoError(t, block.Write(os.Stderr))
 		fmt.Fprintln(os.Stderr)
 
 		numBlocks++

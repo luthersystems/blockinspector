@@ -284,7 +284,7 @@ func TestWritePvtDataKeysTable(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	WritePvtDataKeysTable(&buf, entries)
+	require.NoError(t, WritePvtDataKeysTable(&buf, entries))
 
 	output := buf.String()
 	assert.Contains(t, output, "private")
@@ -295,7 +295,7 @@ func TestWritePvtDataKeysTable(t *testing.T) {
 func TestWritePvtDataKeysTableEmpty(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	WritePvtDataKeysTable(&buf, nil)
+	require.NoError(t, WritePvtDataKeysTable(&buf, nil))
 	assert.Contains(t, buf.String(), "No private data keys found")
 }
 
@@ -547,12 +547,12 @@ func TestOpenStateLevelDBWithExistingLock(t *testing.T) {
 	_, err = OpenStateLevelDB(dir)
 	assert.Error(t, err, "should fail when DB is locked by another process")
 
-	db.Close()
+	require.NoError(t, db.Close())
 
 	// Now should work
 	db2, err := OpenStateLevelDB(dir)
 	require.NoError(t, err)
-	db2.Close()
+	require.NoError(t, db2.Close())
 }
 
 // Smoke test: verify we handle the "no entries for this channel" case
@@ -585,7 +585,7 @@ func TestReadPrivateDataKeysSkipsFormatEntry(t *testing.T) {
 	rawValue := buildTestVersionedValue(t, 10, 0, []byte("val"))
 	require.NoError(t, db.Put(rawKey, rawValue, nil))
 
-	db.Close()
+	require.NoError(t, db.Close())
 	db, err = leveldb.OpenFile(dir, nil)
 	require.NoError(t, err)
 	defer db.Close()

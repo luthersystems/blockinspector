@@ -15,8 +15,6 @@ import (
 	"github.com/hyperledger/fabric-protos-go/ledger/rwset/kvrwset"
 	fabricpeer "github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/luthersystems/blockinspector/internal/protoutil"
-	"github.com/olekukonko/tablewriter"
-	"github.com/olekukonko/tablewriter/tw"
 	pkgerrors "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -36,15 +34,16 @@ type CommonBlock struct {
 	cb.Block
 }
 
-func (s *CommonBlock) Write(w io.Writer) {
+func (s *CommonBlock) Write(w io.Writer) error {
 	if s == nil || w == nil {
-		return
+		return nil
 	}
 	if blk, err := NewBlock(&s.Block); err != nil {
 		logrus.WithError(err).Error("new block")
 	} else {
-		blk.Write(w)
+		return blk.Write(w)
 	}
+	return nil
 }
 
 func (s *CommonBlock) WriteCSV(w *csv.Writer) {
@@ -186,53 +185,54 @@ func (b *Block) ToLedgerView() *LedgerView {
 	return view
 }
 
-func (b *Block) Write(w io.Writer) {
+func (b *Block) Write(w io.Writer) error {
 	if w == nil {
-		return
+		return nil
 	}
 	if b == nil {
-		fmt.Fprint(w, "empty block")
-		return
+		_, err := fmt.Fprint(w, "empty block")
+		return err
 	}
-	table := tablewriter.NewWriter(w)
-	table.Header("Block Num", "Hash", "Num Txs", "Size (bytes)")
-	table.Caption(tw.Caption{Text: "Block Summary"})
-	table.Append([]string{
+	summary := [][]string{{
 		fmt.Sprintf("%d", b.blockNum),
 		formatWithTrailingDots(b.hash, 6),
 		fmt.Sprintf("%d", len(b.transactions)),
 		fmt.Sprintf("%d", b.size),
-	})
-	table.Render() // Send output
-	fmt.Fprintln(w)
-	for i := range b.transactions {
-		b.WriteTx(i, w)
+	}}
+	if err := writeTable(w, "Block Summary", []any{"Block Num", "Hash", "Num Txs", "Size (bytes)"}, summary); err != nil {
+		return err
 	}
+	for i := range b.transactions {
+		if err := b.WriteTx(i, w); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (b *Block) WriteTx(i int, w io.Writer) {
+func (b *Block) WriteTx(i int, w io.Writer) error {
 	if w == nil {
-		return
+		return nil
 	}
 	if i < 0 || i >= len(b.transactions) {
-		return
+		return nil
 	}
 	t := b.transactions[i]
-	table := tablewriter.NewWriter(w)
-	table.Header("ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)")
-	table.Caption(tw.Caption{Text: fmt.Sprintf("Transactions (block=[%d])", b.blockNum)})
 	details := t.GetDetails()
 	event := details.GetEvent()
-	table.Append([]string{
+	txRow := [][]string{{
 		formatWithTrailingDots(string(t.GetID()), 6),
 		b.GetValidation(i).GetReason(),
 		event.GetChaincodeId(),
 		event.String(),
 		fmt.Sprintf("%d", len(event.GetPayload())),
 		fmt.Sprintf("%d", t.GetSize()),
-	})
-	table.Render()
-	fmt.Fprintln(w)
+	}}
+	txCaption := fmt.Sprintf("Transactions (block=[%d])", b.blockNum)
+	txHeader := []any{"ID", "Validation", "Chaincode ID", "Luther Event", "Event Size (bytes)", "Size (bytes)"}
+	if err := writeTable(w, txCaption, txHeader, txRow); err != nil {
+		return err
+	}
 
 	for _, nsRWSet := range details.GetNamespaceReadWriteSet() {
 		if nsRWSet.GetNamespace() == "_lifecycle" && skipLifecycleRWSet {
@@ -240,31 +240,31 @@ func (b *Block) WriteTx(i int, w io.Writer) {
 		}
 		rwSet := nsRWSet.GetReadWriteSet()
 
-		table = tablewriter.NewWriter(w)
-		table.Caption(tw.Caption{Text: fmt.Sprintf("Read Set (namespace=[%s], txid=[%s])", nsRWSet.GetNamespace(), t.GetID())})
-		table.Header("Key", "Version")
+		var reads [][]string
 		for _, record := range rwSet.GetReadSet() {
-			table.Append([]string{
+			reads = append(reads, []string{
 				record.GetKey(),
 				record.GetVersion().String(),
 			})
 		}
-		table.Render()
-		fmt.Fprintln(w)
+		readCaption := fmt.Sprintf("Read Set (namespace=[%s], txid=[%s])", nsRWSet.GetNamespace(), t.GetID())
+		if err := writeTable(w, readCaption, []any{"Key", "Version"}, reads); err != nil {
+			return err
+		}
 
-		table = tablewriter.NewWriter(w)
-		table.Caption(tw.Caption{Text: fmt.Sprintf("Write Set [%s]", nsRWSet.GetNamespace())})
-		table.Header("Key", "Val (size)")
+		var writes [][]string
 		for _, record := range rwSet.GetWriteSet() {
-			table.Append([]string{
+			writes = append(writes, []string{
 				record.GetKey(),
 				fmt.Sprintf("%d", len(record.GetVal())),
 			})
 		}
-
-		table.Render()
-		fmt.Fprintln(w)
+		writeCaption := fmt.Sprintf("Write Set [%s]", nsRWSet.GetNamespace())
+		if err := writeTable(w, writeCaption, []any{"Key", "Val (size)"}, writes); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // GetHash returns block hash.

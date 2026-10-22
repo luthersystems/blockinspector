@@ -70,7 +70,10 @@ func rangeBlock(orderer bool, dir string, channel string, start uint64, end uint
 		if csvWriter != nil {
 			block.WriteCSV(csvWriter)
 		} else {
-			block.Write(os.Stdout)
+			if err := block.Write(os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to write block: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	}
 }
@@ -95,7 +98,10 @@ func inspectSnapshot(snapshotFile string, outputCSV bool) {
 	if csvWriter != nil {
 		snapshot.WriteCSV(csvWriter)
 	} else {
-		snapshot.Write(os.Stdout)
+		if err := snapshot.Write(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write snapshot: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -126,7 +132,10 @@ func inspectPvtdataKeys(cmd PvtdataKeys) {
 		}
 		ledger.WritePvtDataKeysCSV(w, entries)
 	} else {
-		ledger.WritePvtDataKeysTable(os.Stdout, entries)
+		if err := ledger.WritePvtDataKeysTable(os.Stdout, entries); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write private data keys: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 

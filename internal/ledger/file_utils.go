@@ -7,7 +7,7 @@ import (
 )
 
 func dirEmpty(dirPath string) (bool, error) {
-	f, err := os.Open(dirPath)
+	f, err := os.Open(dirPath) //nolint:gosec // G304: the ledger directory is the operator's own CLI argument
 	if err != nil {
 		return false, fmt.Errorf("open [%s]: %w", dirPath, err)
 	}
