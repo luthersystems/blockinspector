@@ -18,4 +18,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          # Pinned: an unpinned release built with an older Go refuses a
+          # module whose go directive is newer, which would turn lint red with
+          # no code change. v2.13.2 is the version svc and elps use.
+          version: v2.13.2

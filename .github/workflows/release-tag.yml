@@ -12,8 +12,9 @@ name: Release (tag)
 #
 # - The run must be on main, and its commit must be GitHub's live main, so a
 #   stale dispatch cannot tag an older commit.
-# - The CI Tests workflow (blockinspector.yml) must have succeeded on a push run
-#   for that commit, so a red main is never released.
+# - The CI Tests (blockinspector.yml) and golangci-lint (golangci-lint.yml)
+#   workflows must each have succeeded on a push run for that commit, so a
+#   red main is never released.
 #
 # No workflow in this repo runs on a tag, so the default GITHUB_TOKEN can
 # create the tag and release directly. A GITHUB_TOKEN-created tag triggers no
@@ -57,7 +58,7 @@ jobs:
       - name: Check the commit is live main and CI passed
         env:
           GH_TOKEN: ${{ github.token }}
-          CI_WORKFLOW: blockinspector.yml
+          CI_WORKFLOWS: blockinspector.yml golangci-lint.yml
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
@@ -69,17 +70,19 @@ jobs:
             echo "error: run commit $GITHUB_SHA is not live main $live; dispatch again" >&2
             exit 1
           fi
-          # Name the state of the newest push run, so a red main reads as
-          # red, not as "wait": waiting will not fix a failed run.
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$CI_WORKFLOW/runs?head_sha=$GITHUB_SHA&event=push" \
-            --jq '[.workflow_runs[] | {status, conclusion, url: .html_url}]')
-          if [ "$(jq '[.[] | select(.conclusion == "success")] | length' <<<"$runs")" -lt 1 ]; then
-            latest_run=$(jq -r 'if length == 0 then "none" else (.[0] | "\(.status) \(.conclusion // "-") \(.url)") end' <<<"$runs")
-            echo "error: no successful push run of $CI_WORKFLOW for $GITHUB_SHA (newest: $latest_run)" >&2
-            echo "error: wait for a run in progress; fix or re-run a failed one" >&2
-            exit 1
-          fi
-          echo "commit $GITHUB_SHA is live main and $CI_WORKFLOW passed"
+          for CI_WORKFLOW in $CI_WORKFLOWS; do
+            # Name the state of the newest push run, so a red main reads as
+            # red, not as "wait": waiting will not fix a failed run.
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$CI_WORKFLOW/runs?head_sha=$GITHUB_SHA&event=push" \
+              --jq '[.workflow_runs[] | {status, conclusion, url: .html_url}]')
+            if [ "$(jq '[.[] | select(.conclusion == "success")] | length' <<<"$runs")" -lt 1 ]; then
+              latest_run=$(jq -r 'if length == 0 then "none" else (.[0] | "\(.status) \(.conclusion // "-") \(.url)") end' <<<"$runs")
+              echo "error: no successful push run of $CI_WORKFLOW for $GITHUB_SHA (newest: $latest_run)" >&2
+              echo "error: wait for a run in progress; fix or re-run a failed one" >&2
+              exit 1
+            fi
+          done
+          echo "commit $GITHUB_SHA is live main and $CI_WORKFLOWS passed"
       - name: Compute and validate version
         id: ver
         env:
@@ -102,6 +105,12 @@ jobs:
             echo "error: version '$version' is not vMAJOR.MINOR.PATCH without leading zeros" >&2
             exit 1
           }
+          # Go resolves a v2+ tag only when the module path ends in /vN.
+          major=${version#v}; major=${major%%.*}
+          if [ "$major" -ge 2 ] && ! grep -Eq "^module .*/v${major}\$" go.mod; then
+            echo "error: $version needs the module path in go.mod to end in /v$major" >&2
+            exit 1
+          fi
           if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
             echo "error: tag $version already exists" >&2
             exit 1

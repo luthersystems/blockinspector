@@ -32,7 +32,7 @@ The binary will be created at `./build/blockinspector`.
 
 ## Requirements
 
-- Go 1.25 or later
+- Go 1.26.10 or later (go.mod's toolchain line; `go install` downloads it when needed)
 - Access to Hyperledger Fabric ledger data directory
 
 ## Usage
