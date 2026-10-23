@@ -188,7 +188,7 @@ func TestSnapshotWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	var out bytes.Buffer
-	state.Write(&out)
+	require.NoError(t, state.Write(&out))
 
 	output := out.String()
 	assert.Contains(t, output, "Ledger Summary")
@@ -204,7 +204,7 @@ func TestSnapshotWriteNil(t *testing.T) {
 	t.Parallel()
 	var s *SnapshotState
 	var buf bytes.Buffer
-	s.Write(&buf) // should not panic
+	require.NoError(t, s.Write(&buf)) // should not panic
 	assert.Empty(t, buf.String())
 }
 

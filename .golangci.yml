@@ -9,6 +9,15 @@ linters:
   disable:
     - errcheck
     - staticcheck
+  exclusions:
+    rules:
+      # internal/blkstorage and internal/fabricutil are copies of
+      # github.com/hyperledger/fabric@v2.1.1 (see their README.md files),
+      # kept so they track upstream. gosec findings there are upstream's;
+      # fix them upstream, not in the copy.
+      - path: internal/(blkstorage|fabricutil)/
+        linters:
+          - gosec
 
 formatters:
   enable:

@@ -297,25 +297,30 @@ func EncodeOrderPreservingVarUint64(n uint64) []byte {
 }
 
 // WritePvtDataKeysTable writes private data key entries in table format.
-func WritePvtDataKeysTable(w io.Writer, entries []*PrivateDataKeyEntry) {
+func WritePvtDataKeysTable(w io.Writer, entries []*PrivateDataKeyEntry) error {
 	if len(entries) == 0 {
-		fmt.Fprintln(w, "No private data keys found.")
-		return
+		_, err := fmt.Fprintln(w, "No private data keys found.")
+		return err
 	}
 
 	table := tablewriter.NewWriter(w)
 	table.Header("Collection", "Key", "Block Num", "Tx Num", "Value Size")
 
 	for _, e := range entries {
-		table.Append([]string{
+		if err := table.Append([]string{
 			e.Collection,
 			e.Key,
 			fmt.Sprintf("%d", e.BlockNum),
 			fmt.Sprintf("%d", e.TxNum),
 			fmt.Sprintf("%d", e.ValueSize),
-		})
+		}); err != nil {
+			return fmt.Errorf("pvtdata keys table: %w", err)
+		}
 	}
-	table.Render()
+	if err := table.Render(); err != nil {
+		return fmt.Errorf("pvtdata keys table: %w", err)
+	}
+	return nil
 }
 
 // WritePvtDataKeysCSV writes private data key entries in CSV format.

@@ -136,7 +136,7 @@ func LoadSnapshot(r io.Reader) (*SnapshotState, error) {
 
 // LoadSnapshotFromFile loads a snapshot from a file path
 func LoadSnapshotFromFile(filePath string) (*SnapshotState, error) {
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // G304: the snapshot file is the operator's own CLI argument
 	if err != nil {
 		return nil, fmt.Errorf("failed to open snapshot file: %w", err)
 	}
@@ -188,14 +188,14 @@ func (s *SnapshotState) ToLedgerView() *LedgerView {
 }
 
 // Write writes a formatted summary of the snapshot to the writer
-func (s *SnapshotState) Write(w io.Writer) {
+func (s *SnapshotState) Write(w io.Writer) error {
 	if s == nil || w == nil {
-		return
+		return nil
 	}
 
 	// Use common representation for consistency
 	view := s.ToLedgerView()
-	view.Write(w)
+	return view.Write(w)
 }
 
 // WriteCSV writes snapshot data in CSV format

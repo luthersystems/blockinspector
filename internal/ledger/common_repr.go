@@ -87,54 +87,52 @@ func (lv *LedgerView) updateStatistics(key *KeyRecord) {
 }
 
 // Write writes a formatted summary of the ledger view
-func (lv *LedgerView) Write(w io.Writer) {
+func (lv *LedgerView) Write(w io.Writer) error {
 	if lv == nil || w == nil {
-		return
+		return nil
 	}
 
 	stats := lv.Statistics
 
 	// Write summary statistics
-	table := tablewriter.NewWriter(w)
-	table.Header("Metric", "Value")
-	table.Caption(tw.Caption{Text: "Ledger Summary"})
-	table.Append([]string{"Total Keys", fmt.Sprintf("%d", stats.TotalKeys)})
-	table.Append([]string{"State Keys", fmt.Sprintf("%d", stats.TotalStateKeys)})
-	table.Append([]string{"Private Keys", fmt.Sprintf("%d", stats.TotalPrivateKeys)})
-	table.Append([]string{"Total Size (bytes)", fmt.Sprintf("%d", stats.TotalSize)})
-	table.Append([]string{"State Size (bytes)", fmt.Sprintf("%d", stats.TotalStateSize)})
-	table.Append([]string{"Private Size (bytes)", fmt.Sprintf("%d", stats.TotalPrivateSize)})
+	summary := [][]string{
+		{"Total Keys", fmt.Sprintf("%d", stats.TotalKeys)},
+		{"State Keys", fmt.Sprintf("%d", stats.TotalStateKeys)},
+		{"Private Keys", fmt.Sprintf("%d", stats.TotalPrivateKeys)},
+		{"Total Size (bytes)", fmt.Sprintf("%d", stats.TotalSize)},
+		{"State Size (bytes)", fmt.Sprintf("%d", stats.TotalStateSize)},
+		{"Private Size (bytes)", fmt.Sprintf("%d", stats.TotalPrivateSize)},
+	}
 	if stats.BlockCount > 0 {
-		table.Append([]string{"Blocks", fmt.Sprintf("%d", stats.BlockCount)})
+		summary = append(summary, []string{"Blocks", fmt.Sprintf("%d", stats.BlockCount)})
 	}
 	if stats.TransactionCount > 0 {
-		table.Append([]string{"Transactions", fmt.Sprintf("%d", stats.TransactionCount)})
+		summary = append(summary, []string{"Transactions", fmt.Sprintf("%d", stats.TransactionCount)})
 	}
-	table.Render()
-	fmt.Fprintln(w)
+	if err := writeTable(w, "Ledger Summary", []any{"Metric", "Value"}, summary); err != nil {
+		return err
+	}
 
 	// Write namespace statistics
 	if len(stats.Namespaces) > 0 {
-		table = tablewriter.NewWriter(w)
-		table.Header("Namespace", "Key Count")
-		table.Caption(tw.Caption{Text: "State Namespaces"})
+		var rows [][]string
 		for _, ns := range sortedKeys(stats.Namespaces) {
-			table.Append([]string{ns, fmt.Sprintf("%d", stats.Namespaces[ns])})
+			rows = append(rows, []string{ns, fmt.Sprintf("%d", stats.Namespaces[ns])})
 		}
-		table.Render()
-		fmt.Fprintln(w)
+		if err := writeTable(w, "State Namespaces", []any{"Namespace", "Key Count"}, rows); err != nil {
+			return err
+		}
 	}
 
 	// Write collection statistics
 	if len(stats.Collections) > 0 {
-		table = tablewriter.NewWriter(w)
-		table.Header("Collection", "Key Count")
-		table.Caption(tw.Caption{Text: "Private Data Collections"})
+		var rows [][]string
 		for _, coll := range sortedKeys(stats.Collections) {
-			table.Append([]string{coll, fmt.Sprintf("%d", stats.Collections[coll])})
+			rows = append(rows, []string{coll, fmt.Sprintf("%d", stats.Collections[coll])})
 		}
-		table.Render()
-		fmt.Fprintln(w)
+		if err := writeTable(w, "Private Data Collections", []any{"Collection", "Key Count"}, rows); err != nil {
+			return err
+		}
 	}
 
 	// Group and write keys by namespace/collection
@@ -153,11 +151,8 @@ func (lv *LedgerView) Write(w io.Writer) {
 	// Write state keys
 	if stateKeys, ok := keysByNamespace["state"]; ok {
 		for _, namespace := range sortedMapKeys(stateKeys) {
-			keys := stateKeys[namespace]
-			table = tablewriter.NewWriter(w)
-			table.Header("Key", "Value Size (bytes)", "Read", "Write")
-			table.Caption(tw.Caption{Text: fmt.Sprintf("State Keys (namespace=[%s])", namespace)})
-			for _, key := range keys {
+			var rows [][]string
+			for _, key := range stateKeys[namespace] {
 				read := ""
 				write := ""
 				if key.IsRead {
@@ -166,31 +161,52 @@ func (lv *LedgerView) Write(w io.Writer) {
 				if key.IsWrite {
 					write = "✓"
 				}
-				table.Append([]string{key.Key, fmt.Sprintf("%d", key.ValueSize), read, write})
+				rows = append(rows, []string{key.Key, fmt.Sprintf("%d", key.ValueSize), read, write})
 			}
-			table.Render()
-			fmt.Fprintln(w)
+			caption := fmt.Sprintf("State Keys (namespace=[%s])", namespace)
+			if err := writeTable(w, caption, []any{"Key", "Value Size (bytes)", "Read", "Write"}, rows); err != nil {
+				return err
+			}
 		}
 	}
 
 	// Write private keys
 	if privateKeys, ok := keysByNamespace["private"]; ok {
 		for _, collection := range sortedMapKeys(privateKeys) {
-			keys := privateKeys[collection]
-			table = tablewriter.NewWriter(w)
-			table.Header("Key", "Value Size (bytes)")
-			table.Caption(tw.Caption{Text: fmt.Sprintf("Private Data Keys (collection=[%s])", collection)})
-			for _, key := range keys {
-				table.Append([]string{key.Key, fmt.Sprintf("%d", key.ValueSize)})
+			var rows [][]string
+			for _, key := range privateKeys[collection] {
+				rows = append(rows, []string{key.Key, fmt.Sprintf("%d", key.ValueSize)})
 			}
-			table.Render()
-			fmt.Fprintln(w)
+			caption := fmt.Sprintf("Private Data Keys (collection=[%s])", collection)
+			if err := writeTable(w, caption, []any{"Key", "Value Size (bytes)"}, rows); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
-// WriteCSV writes ledger view data rows in CSV format.
-// The caller is responsible for writing the header row (see GetCSVLedgerViewHeader).
+// writeTable renders one captioned table and the blank line after it. It
+// returns the first error from tablewriter or the writer, so a failed write
+// to stdout (a closed pipe, a full disk) is reported instead of dropped.
+func writeTable(w io.Writer, caption string, header []any, rows [][]string) error {
+	table := tablewriter.NewWriter(w)
+	table.Header(header...)
+	if caption != "" {
+		table.Caption(tw.Caption{Text: caption})
+	}
+	for _, row := range rows {
+		if err := table.Append(row); err != nil {
+			return fmt.Errorf("table %q: %w", caption, err)
+		}
+	}
+	if err := table.Render(); err != nil {
+		return fmt.Errorf("table %q: %w", caption, err)
+	}
+	_, err := fmt.Fprintln(w)
+	return err
+}
+
 func (lv *LedgerView) WriteCSV(w *csv.Writer) {
 	if lv == nil || w == nil {
 		return
