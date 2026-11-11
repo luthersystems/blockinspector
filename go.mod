@@ -2,7 +2,7 @@ module github.com/luthersystems/blockinspector
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/alecthomas/kong v1.12.1
