@@ -20,5 +20,7 @@ jobs:
         with:
           # Pinned: an unpinned release built with an older Go refuses a
           # module whose go directive is newer, which would turn lint red with
-          # no code change. v2.13.2 is the version svc and elps use.
-          version: v2.13.2
+          # no code change. v2.15.0 is the version the org Quality workflow
+          # uses; v2.13.2 cannot read go1.27 export data ("could not import
+          # fmt ... cannot decode").
+          version: v2.15.0
