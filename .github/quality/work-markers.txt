@@ -1,0 +1,16 @@
+# Allowlist for the shared work marker gate (luthersystems/.github,
+# actions/work-markers). Only for words that are not work: copied source,
+# data, quoted text. Deferred work names its issue on the marker instead.
+#
+# path | text | expires | issue | reason
+#
+# One row per upstream note, not one per file: protoutil is a modified copy,
+# so a new marker there may be our work and must name an issue.
+internal/fabricmetrics/provider.go | Add(delta float64) // TODO: consider removing | never | - | Upstream Fabric v2.1.1 note in the copied common/metrics (see its README.md); not work for this repo.
+internal/protoutil/blockutils.go | // TODO FAB-15864 Remove this fallback | never | - | Upstream Fabric v2.5.9 note in the copied protoutil (see its README.md); not work for this repo.
+internal/protoutil/proputils.go | // TODO: epoch is now set to zero | never | - | Upstream Fabric v2.5.9 note in the copied protoutil (see its README.md); not work for this repo.
+internal/protoutil/proputils.go | // TODO: fix function name as per FAB-11831 | never | - | Upstream Fabric v2.5.9 note in the copied protoutil (see its README.md); not work for this repo.
+internal/protoutil/proputils.go | // TODO: Get the Hash function to be used from | never | - | Upstream Fabric v2.5.9 note in the copied protoutil (see its README.md); not work for this repo.
+internal/protoutil/txutils.go | // TODO: pass in the tx type | never | - | Upstream Fabric v2.5.9 note in the copied protoutil (see its README.md); not work for this repo.
+internal/protoutil/txutils.go | // Timestamp: TODO! | never | - | Upstream Fabric v2.5.9 note in the copied protoutil (see its README.md); not work for this repo.
+internal/protoutil/txutils.go | // TODO: pick right version number | never | - | Upstream Fabric v2.5.9 note in the copied protoutil (see its README.md); not work for this repo.

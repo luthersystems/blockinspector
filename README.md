@@ -209,7 +209,10 @@ make test
 
 ### Code Quality
 
-This project uses `golangci-lint` for code quality checks. The linter runs automatically on pull requests via GitHub Actions.
+This project uses `golangci-lint` for code quality checks, with the config in
+`.golangci.yml`. The org's shared Quality workflow (`.github/workflows/quality.yml`,
+from luthersystems/.github) runs it, with the work marker gate, on every pull
+request and push to `main`.
 
 ## License
 
