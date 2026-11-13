@@ -1,0 +1,9 @@
+# Allowlist for the shared work marker gate (luthersystems/.github,
+# actions/work-markers). Only for words that are not work: copied source,
+# data, quoted text. Deferred work names its issue on the marker instead.
+#
+# path | text | expires | issue | reason
+internal/fabricmetrics/provider.go | * | never | - | Copy of Fabric v2.1.1 common/metrics (see its README.md); the markers are upstream's notes, and the copy tracks upstream.
+internal/protoutil/blockutils.go | * | never | - | Copy of Fabric v2.5.9 protoutil (see its README.md); the markers are upstream's notes, and the copy tracks upstream.
+internal/protoutil/proputils.go | * | never | - | Copy of Fabric v2.5.9 protoutil (see its README.md); the markers are upstream's notes, and the copy tracks upstream.
+internal/protoutil/txutils.go | * | never | - | Copy of Fabric v2.5.9 protoutil (see its README.md); the markers are upstream's notes, and the copy tracks upstream.
