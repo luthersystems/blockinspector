@@ -12,9 +12,9 @@ name: Release (tag)
 #
 # - The run must be on main, and its commit must be GitHub's live main, so a
 #   stale dispatch cannot tag an older commit.
-# - The CI Tests (blockinspector.yml) and golangci-lint (golangci-lint.yml)
-#   workflows must each have succeeded on a push run for that commit, so a
-#   red main is never released.
+# - The CI Tests (blockinspector.yml) and Quality (quality.yml, which runs
+#   golangci-lint) workflows must each have succeeded on a push run for that
+#   commit, so a red main is never released.
 #
 # No workflow in this repo runs on a tag, so the default GITHUB_TOKEN can
 # create the tag and release directly. A GITHUB_TOKEN-created tag triggers no
@@ -58,7 +58,7 @@ jobs:
       - name: Check the commit is live main and CI passed
         env:
           GH_TOKEN: ${{ github.token }}
-          CI_WORKFLOWS: blockinspector.yml golangci-lint.yml
+          CI_WORKFLOWS: blockinspector.yml quality.yml
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
