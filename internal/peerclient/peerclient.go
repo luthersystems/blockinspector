@@ -12,7 +12,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -21,6 +20,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto" //nolint:staticcheck // fabric-protos-go v0.3 is generated for the v1 API
@@ -30,6 +30,7 @@ import (
 	fabricpeer "github.com/hyperledger/fabric-protos-go/peer"
 
 	"github.com/luthersystems/blockinspector/internal/explorer"
+	"github.com/luthersystems/blockinspector/internal/protoutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -117,7 +118,11 @@ func (c *Client) Dial() (*grpc.ClientConn, error) {
 // Deliver streams blocks from number start (or the oldest block the peer
 // has, when oldest is true) and calls fn with each, until ctx ends, fn
 // returns an error, or the stream fails. It waits for new blocks at the tip.
-// It calls onOpen, when set, once the request is sent.
+// It calls onOpen, when set, once the peer has accepted the request: at the
+// first block, or when the stream is still open OpenGrace after the
+// request (a peer at the tip sends nothing). A refused request (a wrong
+// channel, an identity that is not a reader) ends at once with a status, so
+// it never counts as open.
 func (c *Client) Deliver(ctx context.Context, conn *grpc.ClientConn, start uint64, oldest bool, onOpen func(), fn func(*cb.Block) error) error {
 	env, err := c.seekEnvelope(start, oldest)
 	if err != nil {
@@ -135,9 +140,27 @@ func (c *Client) Deliver(ctx context.Context, conn *grpc.ClientConn, start uint6
 	if err := stream.CloseSend(); err != nil {
 		return fmt.Errorf("close send: %w", err)
 	}
-	if onOpen != nil {
+	var (
+		mu     sync.Mutex
+		ended  bool
+		opened bool
+	)
+	open := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if ended || opened || onOpen == nil {
+			return
+		}
+		opened = true
 		onOpen()
 	}
+	timer := time.AfterFunc(OpenGrace, open)
+	defer func() {
+		timer.Stop()
+		mu.Lock()
+		ended = true
+		mu.Unlock()
+	}()
 	for {
 		resp, err := stream.Recv()
 		if ctx.Err() != nil {
@@ -151,6 +174,7 @@ func (c *Client) Deliver(ctx context.Context, conn *grpc.ClientConn, start uint6
 		}
 		switch t := resp.GetType().(type) {
 		case *fabricpeer.DeliverResponse_Block:
+			open()
 			if err := fn(t.Block); err != nil {
 				return err
 			}
@@ -159,6 +183,10 @@ func (c *Client) Deliver(ctx context.Context, conn *grpc.ClientConn, start uint6
 		}
 	}
 }
+
+// OpenGrace is how long a deliver stream must stay open with no block
+// before it counts as accepted.
+var OpenGrace = 2 * time.Second
 
 // seekEnvelope builds the signed SeekInfo request.
 func (c *Client) seekEnvelope(start uint64, oldest bool) (*cb.Envelope, error) {
@@ -175,23 +203,22 @@ func (c *Client) seekEnvelope(start uint64, oldest bool) (*cb.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	nonce := make([]byte, 24)
-	if _, err := rand.Read(nonce); err != nil {
+	nonce, err := protoutil.CreateNonce()
+	if err != nil {
 		return nil, err
 	}
 	creator := c.signer.serialized
-	txID := sha256.Sum256(append(append([]byte{}, nonce...), creator...))
 	chdr, err := proto.Marshal(&cb.ChannelHeader{
 		Type:        int32(cb.HeaderType_DELIVER_SEEK_INFO),
 		ChannelId:   c.cfg.Channel,
-		TxId:        hex.EncodeToString(txID[:]),
+		TxId:        protoutil.ComputeTxID(nonce, creator),
 		Timestamp:   timestamppb.New(time.Now()),
 		TlsCertHash: c.tlsCertHash,
 	})
 	if err != nil {
 		return nil, err
 	}
-	shdr, err := proto.Marshal(&cb.SignatureHeader{Creator: creator, Nonce: nonce})
+	shdr, err := proto.Marshal(protoutil.MakeSignatureHeader(creator, nonce))
 	if err != nil {
 		return nil, err
 	}

@@ -90,6 +90,9 @@ func (ix *Index) Add(blk *cb.Block) error {
 	if err != nil {
 		return err
 	}
+	if d.json, err = json.Marshal(d.Block); err != nil {
+		return fmt.Errorf("encode block %d: %w", d.Number, err)
+	}
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 	next := ix.first + uint64(len(ix.blocks))
@@ -152,7 +155,13 @@ func (ix *Index) applyPhylumWrite(namespace string, w Write, ref TxRef) {
 			return
 		}
 		var desc phylumDescription
-		_ = json.Unmarshal(w.Value.Bytes(), &desc) // an undecodable description keeps its event, with no status
+		if err := json.Unmarshal(w.Value.Bytes(), &desc); err != nil {
+			// Keep what is known of the version, and show the write.
+			if pv != nil {
+				pv.Events = append(pv.Events, PhylumEvent{TxRef: ref, Action: "undecodable"})
+			}
+			return
+		}
 		action := phylumAction(pv, desc.Status)
 		if pv == nil {
 			pv = &PhylumVersion{Namespace: namespace, Version: version, Events: []PhylumEvent{}}
@@ -206,6 +215,28 @@ func (ix *Index) BlocksFrom(from uint64, limit int) []Block {
 	return out
 }
 
+// BlockEvent is a block's number and its Block JSON.
+type BlockEvent struct {
+	Data   []byte
+	Number uint64
+}
+
+// BlockEventsFrom returns up to limit encoded blocks from number from,
+// oldest first.
+func (ix *Index) BlockEventsFrom(from uint64, limit int) []BlockEvent {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	if from < ix.first {
+		from = ix.first
+	}
+	var out []BlockEvent
+	for n := from; n < ix.first+uint64(len(ix.blocks)) && len(out) < limit; n++ {
+		b := ix.blocks[n-ix.first]
+		out = append(out, BlockEvent{Number: b.Number, Data: b.json})
+	}
+	return out
+}
+
 // Block returns a block, or false when the index does not hold it.
 func (ix *Index) Block(num uint64) (Block, bool) {
 	ix.mu.RLock()
@@ -235,7 +266,10 @@ type TxFilter struct {
 	Valid *bool
 	// Before selects transactions in blocks below this number; 0 is all.
 	Before uint64
-	Limit  int
+	// BeforeIndex, when set, also selects the transactions of block Before
+	// with an index below it, to continue a page that ended inside a block.
+	BeforeIndex *int
+	Limit       int
 }
 
 // Transactions returns transaction summaries, newest first.
@@ -244,12 +278,21 @@ func (ix *Index) Transactions(f TxFilter) []TxSummary {
 	defer ix.mu.RUnlock()
 	out := []TxSummary{}
 	end := ix.first + uint64(len(ix.blocks))
+	partial := -1
 	if f.Before != 0 && f.Before < end {
 		end = f.Before
+		if f.BeforeIndex != nil && f.Before >= ix.first {
+			end = f.Before + 1
+			partial = *f.BeforeIndex
+		}
 	}
 	for n := end; n > ix.first && len(out) < f.Limit; n-- {
 		txs := ix.blocks[n-1-ix.first].Transactions
-		for i := len(txs) - 1; i >= 0 && len(out) < f.Limit; i-- {
+		top := len(txs) - 1
+		if partial >= 0 && n == end {
+			top = min(top, partial-1)
+		}
+		for i := top; i >= 0 && len(out) < f.Limit; i-- {
 			tx := txs[i]
 			if f.Method != "" && tx.Method != f.Method && !contains(tx.BatchMethods, f.Method) {
 				continue

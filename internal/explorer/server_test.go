@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -235,4 +236,43 @@ func TestStreamCatchUp(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(ev.data), &blk))
 		require.Equal(t, uint64(i), blk.Number)
 	}
+}
+
+// TestTransactionsPaging pages through every transaction with the next
+// cursor, including pages that end inside a block.
+func TestTransactionsPaging(t *testing.T) {
+	ix := testIndex(t)
+	srv := testServer(t, ix, ServerOptions{})
+	want := ix.Transactions(TxFilter{Limit: 100})
+	var got []string
+	path := "/v1/transactions?limit=2"
+	for range 20 {
+		var page TransactionsResponse
+		getJSON(t, srv, path, http.StatusOK, &page)
+		for _, tx := range page.Transactions {
+			got = append(got, tx.ID)
+		}
+		if page.Next == nil {
+			break
+		}
+		path = fmt.Sprintf("/v1/transactions?limit=2&before=%d&before_index=%d", page.Next.Before, page.Next.BeforeIndex)
+	}
+	var ids []string
+	for _, tx := range want {
+		ids = append(ids, tx.ID)
+	}
+	assert.Equal(t, ids, got)
+	getJSON(t, srv, "/v1/transactions?before_index=1", http.StatusBadRequest, nil)
+	getJSON(t, srv, "/v1/transactions?before=2&before_index=-1", http.StatusBadRequest, nil)
+}
+
+func TestServerPreflight(t *testing.T) {
+	srv := testServer(t, testIndex(t), ServerOptions{AllowOrigin: "http://localhost:3000"})
+	req, err := http.NewRequest(http.MethodOptions, srv.URL+"/v1/stream/blocks", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close() //nolint:errcheck // test
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, "Last-Event-ID", resp.Header.Get("Access-Control-Allow-Headers"))
 }

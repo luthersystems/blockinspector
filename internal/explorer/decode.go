@@ -173,6 +173,8 @@ func (v *Value) Bytes() []byte {
 // decodedBlock is a decoded block with its full transactions.
 type decodedBlock struct {
 	txs []*Transaction
+	// json is Block encoded once, for the event streams.
+	json []byte
 	Block
 }
 

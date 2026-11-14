@@ -3,6 +3,7 @@ package explorer
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -67,8 +68,14 @@ func NewServer(ix *Index, status func() Status, opts ServerOptions) *Server {
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.opts.AllowOrigin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", s.opts.AllowOrigin)
-		w.Header().Set("Access-Control-Allow-Headers", "Last-Event-ID")
+		h := w.Header()
+		h.Set("Access-Control-Allow-Origin", s.opts.AllowOrigin)
+		h.Set("Access-Control-Allow-Headers", "Last-Event-ID")
+		h.Set("Access-Control-Allow-Methods", "GET")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 	}
 	s.mux.ServeHTTP(w, r)
 }
@@ -176,7 +183,15 @@ func (s *Server) handleBlock(w http.ResponseWriter, r *http.Request) {
 
 // TransactionsResponse is the body of GET /v1/transactions.
 type TransactionsResponse struct {
+	// Next is the before and before_index parameters of the next page.
+	Next         *TxCursor   `json:"next,omitempty"`
 	Transactions []TxSummary `json:"transactions"`
+}
+
+// TxCursor continues a transaction list after its last row.
+type TxCursor struct {
+	Before      uint64 `json:"before"`
+	BeforeIndex int    `json:"before_index"`
 }
 
 func (s *Server) handleTransactions(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +206,14 @@ func (s *Server) handleTransactions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
+	if v := q.Get("before_index"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || f.Before == 0 {
+			writeError(w, http.StatusBadRequest, "before_index: a non-negative integer, with before")
+			return
+		}
+		f.BeforeIndex = &n
+	}
 	if v := q.Get("valid"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -199,7 +222,14 @@ func (s *Server) handleTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Valid = &b
 	}
-	writeJSON(w, http.StatusOK, TransactionsResponse{Transactions: s.ix.Transactions(f)})
+	txs := s.ix.Transactions(f)
+	resp := TransactionsResponse{Transactions: txs}
+	// A page that ends in block 0 has nothing older to continue to.
+	if n := len(txs); n == f.Limit && (txs[n-1].BlockNumber > 0 || txs[n-1].Index > 0) {
+		last := txs[n-1]
+		resp.Next = &TxCursor{Before: last.BlockNumber, BeforeIndex: last.Index}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleTransaction(w http.ResponseWriter, r *http.Request) {
@@ -307,10 +337,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "streaming is not supported")
 		return
 	}
+	// With no block yet, every block the explorer reads is new to it, so
+	// the stream starts at the first block it reads.
 	next, _ := s.ix.Height()
 	if last := r.Header.Get("Last-Event-ID"); last != "" {
 		n, err := strconv.ParseUint(last, 10, 64)
-		if err != nil {
+		if err != nil || n == math.MaxUint64 {
 			writeError(w, http.StatusBadRequest, "Last-Event-ID: not a block number")
 			return
 		}
@@ -341,14 +373,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		// Take the change channel before reading, so a block added between
 		// the read and the wait still wakes the stream.
 		changed := s.ix.Changed()
-		blocks := s.ix.BlocksFrom(next, streamBatch)
+		blocks := s.ix.BlockEventsFrom(next, streamBatch)
 		for _, b := range blocks {
-			data, err := json.Marshal(b)
-			if err != nil {
-				logrus.WithError(err).Error("encode block event")
-				return
-			}
-			if _, err := fmt.Fprintf(w, "id: %d\nevent: block\ndata: %s\n\n", b.Number, data); err != nil {
+			if _, err := fmt.Fprintf(w, "id: %d\nevent: block\ndata: %s\n\n", b.Number, b.Data); err != nil {
 				return
 			}
 			next = b.Number + 1

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hyperledger/fabric-protos-go/ledger/rwset/kvrwset"
+	fabricpeer "github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -245,4 +247,15 @@ func TestLedgerSource(t *testing.T) {
 	assert.Equal(t, "Admin@org1.luther.systems", tx.Creator.Subject)
 	require.Len(t, tx.Endorsers, 1)
 	assert.Equal(t, "peer0.org1.luther.systems", tx.Endorsers[0].Subject)
+}
+
+// TestPhylumUndecodable: a description that is not JSON shows as an event
+// and keeps the version's status.
+func TestPhylumUndecodable(t *testing.T) {
+	ix := testIndex(t)
+	require.NoError(t, ix.Add(testBlock(t, 8, testTx{id: "tx-bad", request: call("update"), code: fabricpeer.TxValidationCode_VALID,
+		writes: []*kvrwset.KVWrite{write("luther:phylum:desc:v1", "not json")}})))
+	v := ix.PhylumVersions()[0]
+	assert.Equal(t, "IN_SERVICE", v.Status)
+	assert.Equal(t, "undecodable", v.Events[len(v.Events)-1].Action)
 }

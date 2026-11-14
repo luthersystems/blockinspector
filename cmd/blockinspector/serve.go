@@ -100,7 +100,9 @@ func serve(cmd Serve) error {
 			logrus.WithError(err).Error("block source stopped")
 		}
 	}()
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -110,5 +112,7 @@ func serve(cmd Serve) error {
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	// Serve returns as soon as Shutdown starts; wait for the open requests.
+	<-shutdownDone
 	return nil
 }

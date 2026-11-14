@@ -322,3 +322,32 @@ func TestNetworkConfigErrors(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, "Org2MSP", mspID("org2"))
 }
+
+// TestDeliverOpenAtTip: a peer at the tip sends no block, so the stream
+// counts as open once it has stayed open for OpenGrace.
+func TestDeliverOpenAtTip(t *testing.T) {
+	old := OpenGrace
+	OpenGrace = 50 * time.Millisecond
+	t.Cleanup(func() { OpenGrace = old })
+	tlsCA, signCA := newCA(t, "tlsca.org1.example.com"), newCA(t, "ca.org1.example.com")
+	p := &fakePeer{t: t, signCA: signCA, seeks: make(chan *ab.SeekInfo, 1), channel: "luther"}
+	addr := startPeer(t, tlsCA, p)
+	cfg, err := NetworkConfig(NetworkOptions{Dir: network(t, tlsCA, signCA), Peer: "peer0", User: "User1", Address: addr, Channel: "luther"})
+	require.NoError(t, err)
+	client, err := New(cfg)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opened := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- Source{Client: client}.Stream(ctx, explorer.StreamRequest{Next: 7, OnOpen: func() { close(opened) }}, func(*cb.Block) error { return nil })
+	}()
+	select {
+	case <-opened:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream at the tip never counted as open")
+	}
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
