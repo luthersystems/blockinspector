@@ -252,11 +252,8 @@ func (ix *Index) Block(num uint64) (Block, bool) {
 func (ix *Index) Transaction(id string) (*Transaction, bool) {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()
-	loc, ok := ix.txByID[id]
-	if !ok {
-		return nil, false
-	}
-	return ix.blocks[loc.block].txs[loc.tx], true
+	tx := ix.txLocked(id)
+	return tx, tx != nil
 }
 
 // TxFilter selects transactions.

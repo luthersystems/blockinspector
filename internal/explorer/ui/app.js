@@ -339,6 +339,8 @@
     [/^\/flows$/, "flows", pageFlows],
     [/^\/flows\/([^/]+)$/, "flows", pageFlowRuns],
     [/^\/flows\/([^/]+)\/runs\/([^/]+)$/, "flows", pageFlowRun],
+    [/^\/batches$/, "batches", pageBatches],
+    [/^\/batch$/, "batches", pageBatchQueue],
   ];
 
   async function route() {
@@ -951,6 +953,86 @@
             h("td", null, txLink(r.tx_id, true))))));
     }
     render(ctx.isCurrent, out);
+  }
+
+
+  // ---- Batches ------------------------------------------------------------
+
+  function pausedText(p) {
+    if (p === undefined || p === null) return h("span", { class: "muted" }, "unknown");
+    return p ? h("span", { class: "badge warn" }, "paused") : "no";
+  }
+
+  function batchQueueLink(q) {
+    return h("a", { href: hashLink("/batch", { namespace: q.namespace, name: q.name }), class: "mono" }, q.name);
+  }
+
+  async function pageBatches(ctx) {
+    const data = await api("/v1/batches");
+    render(ctx.isCurrent,
+      h("h1", null, "Batches"),
+      h("p", { class: "muted" }, "Substrate batch queues (luther:batch:). An item is due once its time has passed at the latest block."),
+      table(["Queue", "Namespace", "#Prepared", "#Due", "Oldest due", "#Pending batches", "#Pending items", "Paused", "Created"], data.queues.map((q) =>
+        h("tr", null,
+          h("td", null, batchQueueLink(q)),
+          h("td", { class: "mono" }, q.namespace),
+          h("td", { class: "num" }, String(q.prepared)),
+          h("td", { class: "num" }, String(q.due)),
+          h("td", null, fmtTime(q.oldest_due)),
+          h("td", { class: "num" }, String(q.pending_batches)),
+          h("td", { class: "num" }, String(q.pending_items)),
+          h("td", null, pausedText(q.paused)),
+          h("td", null, q.created ? "yes" : h("span", { class: "badge warn", title: "No queue record: init did not create this queue" }, "no"))))),
+      data.queues.length ? null : h("p", { class: "muted" }, "No batch queue on this channel yet."),
+      data.undecodable_keys ? h("p", null, h("span", { class: "badge warn" }, String(data.undecodable_keys)),
+        " live keys under luther:batch: have a form this explorer does not know. ",
+        h("a", { href: hashLink("/keys", { space: "luther:batch:" }) }, "List them")) : null);
+  }
+
+  async function pageBatchQueue(ctx) {
+    const namespace = ctx.query.get("namespace") || "";
+    const name = ctx.query.get("name") || "";
+    const p = await api("/v1/batches/queue", { namespace: namespace, name: name });
+    const outcome = (f) => f.outcome === "collected" ? ["collected into ", h("span", { class: "mono" }, f.batch)]
+      : f.outcome === "skipped" ? h("span", { class: "badge warn", title: "Its request record was missing or not a JSON object" }, "skipped")
+        : f.outcome;
+    render(ctx.isCurrent,
+      h("h1", null, "Batch queue ", h("span", { class: "mono break" }, p.name)),
+      h("p", null, h("a", { href: hashLink("/batches") }, "All queues"), " · ", h("span", { class: "mono" }, p.namespace)),
+      fields([
+        ["Prepared", String(p.prepared)],
+        ["Due", String(p.due) + (p.as_of ? " at the latest block (" + new Date(p.as_of).toLocaleString() + ")" : "")],
+        ["Pending batches", String(p.pending_batches) + " (" + p.pending_items + " items)"],
+        ["Paused", pausedText(p.paused)],
+        ["Created", p.created ? "yes" : "no: init did not create this queue"],
+      ]),
+      h("h2", null, "Pending batches"),
+      h("p", { class: "muted" }, "A processor took these and has not answered. Delivery is at most once, so a batch left here needs an operator."),
+      table(["Batch", "Items", "Taken by", "Taken"], p.pending.map((b) =>
+        h("tr", null,
+          h("td", null, h("a", { href: hashLink("/key", { namespace: p.namespace, key: b.key }), class: "mono" }, b.id)),
+          h("td", { class: "mono break" }, b.undecodable ? h("span", { class: "muted" }, "not a list of ids") : b.items.join(", ")),
+          h("td", null, txLink(b.taken.tx_id, true)),
+          h("td", null, fmtTime(b.taken.time))))),
+      p.pending.length ? null : h("p", { class: "muted" }, "None."),
+      h("h2", null, "Prepared items"),
+      table(["Item", "Due", "Request record", "Scheduled by"], p.items.map((it) =>
+        h("tr", null,
+          h("td", null, h("a", { href: hashLink("/key", { namespace: p.namespace, key: it.key }), class: "mono" }, it.id)),
+          h("td", null, fmtTime(it.due), it.is_due ? [" ", h("span", { class: "badge ok" }, "due")] : null),
+          h("td", null, it.has_request ? "yes" : h("span", { class: "badge bad" }, "missing")),
+          h("td", null, txLink(it.scheduled.tx_id, true))))),
+      p.items.length ? null : h("p", { class: "muted" }, "None."),
+      h("h2", null, "Finished items"),
+      h("p", { class: "muted" }, "Items that left the queue, latest first (at most 200)."),
+      table(["Item", "Due", "Outcome", "Removed by", "Method"], p.finished.map((f) =>
+        h("tr", null,
+          h("td", null, h("a", { href: hashLink("/key", { namespace: p.namespace, key: f.key }), class: "mono" }, f.id)),
+          h("td", null, fmtTime(f.due)),
+          h("td", null, outcome(f)),
+          h("td", null, txLink(f.removed.tx_id, true)),
+          h("td", { class: "mono" }, f.removed.method || "")))),
+      p.finished.length ? null : h("p", { class: "muted" }, "None."));
   }
 
   // ---- Start --------------------------------------------------------------

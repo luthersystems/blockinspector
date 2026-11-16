@@ -65,6 +65,8 @@ func NewServer(ix *Index, status func() Status, opts ServerOptions) *Server {
 	s.mux.HandleFunc("GET /v1/flows", s.handleFlows)
 	s.mux.HandleFunc("GET /v1/flows/{flow}/runs", s.handleFlowRuns)
 	s.mux.HandleFunc("GET /v1/flows/{flow}/runs/{run}", s.handleFlowRun)
+	s.mux.HandleFunc("GET /v1/batches", s.handleBatches)
+	s.mux.HandleFunc("GET /v1/batches/queue", s.handleBatchQueue)
 	// An unknown API path answers JSON, not the UI's file server.
 	s.mux.HandleFunc("GET /v1/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint: %s", r.URL.Path)
@@ -447,6 +449,36 @@ func (s *Server) handleFlowRun(w http.ResponseWriter, r *http.Request) {
 	page, ok := s.ix.FlowRun(r.URL.Query().Get("namespace"), flow, run)
 	if !ok {
 		writeError(w, http.StatusNotFound, "run %s of flow %s not found in public state", run, flow)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// BatchesResponse is the body of GET /v1/batches.
+type BatchesResponse struct {
+	Queues []BatchQueue `json:"queues"`
+	// UndecodableKeys counts live keys under luther:batch: of no known
+	// form. They are in no queue.
+	UndecodableKeys int `json:"undecodable_keys,omitempty"`
+}
+
+func (s *Server) handleBatches(w http.ResponseWriter, r *http.Request) {
+	queues, undecodable := s.ix.BatchQueues()
+	writeJSON(w, http.StatusOK, BatchesResponse{Queues: queues, UndecodableKeys: undecodable})
+}
+
+// handleBatchQueue serves one queue. The name is a query parameter, as a
+// key is: a queue name can hold any byte.
+func (s *Server) handleBatchQueue(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	name := q.Get("name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	page, ok := s.ix.BatchQueue(q.Get("namespace"), name)
+	if !ok {
+		writeError(w, http.StatusNotFound, "batch queue %s not found", name)
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
