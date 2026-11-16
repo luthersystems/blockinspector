@@ -336,6 +336,9 @@
     [/^\/key$/, "keys", pageKeyHistory],
     [/^\/framework$/, "framework", pageFramework],
     [/^\/phylum$/, "phylum", pagePhylum],
+    [/^\/flows$/, "flows", pageFlows],
+    [/^\/flows\/([^/]+)$/, "flows", pageFlowRuns],
+    [/^\/flows\/([^/]+)\/runs\/([^/]+)$/, "flows", pageFlowRun],
   ];
 
   async function route() {
@@ -759,6 +762,191 @@
     render(ctx.isCurrent,
       h("h1", null, "Phylum versions"),
       versions.length ? versions : h("p", { class: "muted" }, "No phylum version on this channel yet."));
+  }
+
+
+  // ---- DefFlow ------------------------------------------------------------
+
+  // A flow header stores Unix seconds.
+  function fmtUnix(sec) {
+    if (!sec) return h("span", { class: "muted" }, "—");
+    return fmtTime(new Date(sec * 1000).toISOString());
+  }
+
+  function flowStateBadge(state) {
+    const cls = state === "done" ? "ok" : state === "failed" ? "bad" : state === "waiting" ? "warn" : "";
+    return h("span", { class: "badge " + cls }, state || "unknown");
+  }
+
+  function countsText(m) {
+    const parts = Object.keys(m || {}).sort().map((k) => k + " " + m[k]);
+    return parts.length ? parts.join(", ") : "";
+  }
+
+  function flowRunLink(flow, id, namespace, short) {
+    const text = short && id.length > 16 ? id.slice(0, 12) + "…" : id;
+    return h("a", {
+      href: hashLink("/flows/" + encodeURIComponent(flow) + "/runs/" + encodeURIComponent(id), { namespace: namespace }),
+      class: "mono", title: id,
+    }, text);
+  }
+
+  async function pageFlows(ctx) {
+    const data = await api("/v1/flows");
+    render(ctx.isCurrent,
+      h("h1", null, "Flows"),
+      h("p", { class: "muted" }, "DefFlow runs in public state. A flow with a private store keeps only hashes on the ledger and does not show here."),
+      table(["Flow", "Namespace", "#Runs", "By state", "By kind", "#Parked", "Manifests"], data.flows.map((f) =>
+        h("tr", null,
+          h("td", null, h("a", { href: hashLink("/flows/" + encodeURIComponent(f.flow), { namespace: f.namespace }), class: "mono" }, f.flow)),
+          h("td", { class: "mono" }, f.namespace),
+          h("td", { class: "num" }, String(f.runs)),
+          h("td", null, countsText(f.by_state),
+            f.undecodable ? h("span", { class: "muted" }, (countsText(f.by_state) ? ", " : "") + f.undecodable + " other format") : null),
+          h("td", null, countsText(f.by_kind)),
+          h("td", { class: "num" }, String(f.parked)),
+          h("td", { class: "mono" }, (f.manifests || []).join(", "))))),
+      data.flows.length ? null : h("p", { class: "muted" }, "No flow runs on this channel yet."));
+  }
+
+  function flowRunRow(r) {
+    const hd = r.header;
+    return h("tr", null,
+      h("td", null, flowRunLink(r.flow, r.id, r.namespace, true)),
+      h("td", null, hd ? flowStateBadge(hd.state) : h("span", { class: "badge" }, "format " + rawVersion(r.raw))),
+      h("td", { class: "mono" }, hd ? hd.label || "" : ""),
+      h("td", null, hd ? hd.kind || "" : ""),
+      h("td", { class: "mono" }, hd ? hd.phylum || "" : ""),
+      h("td", { class: "mono" }, hd ? hd.caller || "" : ""),
+      h("td", null, hd ? fmtUnix(hd.updated_at) : ""),
+      h("td", null, txLink(r.last_write.tx_id, true)));
+  }
+
+  function rawVersion(raw) {
+    return raw && typeof raw === "object" && raw.v !== undefined ? String(raw.v) : "?";
+  }
+
+  async function pageFlowRuns(ctx) {
+    const flow = decodeURIComponent(ctx.match[1]);
+    const names = ["state", "kind", "label", "phylum", "caller", "q"];
+    const params = { namespace: ctx.query.get("namespace") || "" };
+    for (const n of names) params[n] = ctx.query.get(n) || "";
+    const data = await api("/v1/flows/" + encodeURIComponent(flow) + "/runs", Object.assign({ limit: 200 }, params));
+
+    const stateSel = h("select", { name: "state" },
+      ["", "waiting", "done", "failed"].map((v) => h("option", { value: v }, v || "any")));
+    stateSel.value = params.state;
+    const kindSel = h("select", { name: "kind" },
+      ["", "input", "connector", "flow"].map((v) => h("option", { value: v }, v || "any")));
+    kindSel.value = params.kind;
+    const inputs = {};
+    for (const [n, label, ph] of [["label", "Label", "any"], ["phylum", "Phylum", "any"], ["caller", "Caller", "any"], ["q", "Run ID", "prefix or part"]]) {
+      inputs[n] = h("input", { type: "text", value: params[n], placeholder: ph, name: n });
+    }
+    const form = h("form", { class: "filters" },
+      h("label", null, "State", stateSel),
+      h("label", null, "Waiting on", kindSel),
+      h("label", null, "Label", inputs.label),
+      h("label", null, "Phylum", inputs.phylum),
+      h("label", null, "Caller", inputs.caller),
+      h("label", null, "Run ID", inputs.q),
+      h("button", { type: "submit" }, "Filter"));
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      go(hashLink("/flows/" + encodeURIComponent(flow), {
+        namespace: params.namespace, state: stateSel.value, kind: kindSel.value,
+        label: inputs.label.value.trim(), phylum: inputs.phylum.value.trim(),
+        caller: inputs.caller.value.trim(), q: inputs.q.value.trim(),
+      }));
+    });
+    render(ctx.isCurrent,
+      h("h1", null, "Flow ", h("span", { class: "mono" }, flow)),
+      h("p", null, h("a", { href: hashLink("/flows") }, "All flows")),
+      form,
+      table(["Run", "State", "Label", "Waiting on", "Phylum", "Caller", "Updated", "Last write"], data.runs.map(flowRunRow)),
+      data.runs.length ? null : h("p", { class: "muted" }, "No runs match."),
+      data.runs.length >= 200 ? h("p", { class: "muted" }, "Showing the 200 most recently written runs. Filter to narrow the list.") : null);
+  }
+
+  async function pageFlowRun(ctx) {
+    const flow = decodeURIComponent(ctx.match[1]);
+    const id = decodeURIComponent(ctx.match[2]);
+    const namespace = ctx.query.get("namespace") || "";
+    const p = await api("/v1/flows/" + encodeURIComponent(flow) + "/runs/" + encodeURIComponent(id), { namespace: namespace });
+    const hd = p.header;
+    const flowHref = hashLink("/flows/" + encodeURIComponent(flow), { namespace: p.namespace });
+    const out = [
+      h("h1", null, "Run ", h("span", { class: "mono break" }, p.id)),
+      h("p", null, "Flow ", h("a", { href: flowHref, class: "mono" }, p.flow), " on ", h("span", { class: "mono" }, p.namespace)),
+    ];
+    if (hd) {
+      out.push(fields([
+        ["State", flowStateBadge(hd.state)],
+        ["Label", hd.label ? h("span", { class: "mono" }, hd.label) : null],
+        ["Waiting on", hd.kind],
+        ["Input from", hd.from && hd.from.length ? hd.from.join(", ") : null],
+        ["Due", hd.due_at ? fmtUnix(hd.due_at) : null],
+        ["Generation", String(hd.gen)],
+        ["History rows", String(hd.hist)],
+        ["Inputs", hd.inputs ? String(hd.inputs) : null],
+        ["Attempt", hd.attempt ? String(hd.attempt) + (hd.retry_cap ? " of " + hd.retry_cap : "") : null],
+        ["Flow version", h("span", { class: "mono" }, hd.version)],
+        ["Manifest", hd.manifest ? h("span", { class: "mono" }, hd.manifest) : null],
+        ["Phylum", hd.phylum ? h("span", { class: "mono" }, hd.phylum) : null],
+        ["Pinned", hd.pinned ? "yes" : null],
+        ["Caller", hd.caller ? h("span", { class: "mono" }, hd.caller) : null],
+        ["Parent", hd.parent ? [flowRunLink(hd.parent.flow, hd.parent.run, p.namespace, false),
+          h("span", { class: "muted" }, " (" + hd.parent.flow + (hd.parent.label ? ", " + hd.parent.label : "") + ")")] : null],
+        ["Child", hd.child ? flowRunLink(hd.child_flow || p.flow, hd.child, p.namespace, false) : null],
+        ["Depth", hd.depth ? String(hd.depth) : null],
+        ["Started", fmtUnix(hd.started_at)],
+        ["Updated", fmtUnix(hd.updated_at)],
+        ["Last write", txLink(p.last_write.tx_id, false)],
+        ["Result", p.has_result ? h("span", { class: "muted" }, "stored, not shown") : null],
+        ["Saved locals", p.has_vars ? h("span", { class: "muted" }, "stored, not shown") : null],
+      ]));
+      if (hd.error) {
+        const e = hd.error;
+        out.push(h("h2", null, "Error"), fields([
+          ["Reason", h("span", { class: "badge bad" }, e.reason)],
+          ["Kind", e.kind],
+          ["Label", e.label ? h("span", { class: "mono" }, e.label) : null],
+          ["Attempts", e.attempts ? String(e.attempts) : null],
+          ["Message", e.message],
+        ]), h("p", { class: "muted" }, "The error's data is not shown: it can hold personal data."));
+      }
+    } else {
+      out.push(h("p", { class: "muted" }, "This header has a format this explorer does not know (version " + rawVersion(p.raw) + "). It is shown as stored."),
+        h("pre", { class: "value" }, JSON.stringify(p.raw, null, 2)));
+    }
+    out.push(h("h2", null, "History"),
+      table(["#N", "#Gen", "Event", "From", "To", "Sender", "At", "Transaction"], (p.history || []).map((e) =>
+        h("tr", null,
+          h("td", { class: "num" }, String(e.n)),
+          h("td", { class: "num" }, String(e.gen)),
+          h("td", null, e.event),
+          h("td", { class: "mono" }, e.from || ""),
+          h("td", { class: "mono" }, e.to || ""),
+          h("td", { class: "mono" }, e.sender || ""),
+          h("td", null, fmtTime(e.at)),
+          h("td", null, txLink(e.tx_id, true))))),
+      (p.history || []).length ? null : h("p", { class: "muted" }, "No history rows in public state."));
+    if (p.children && p.children.length) {
+      out.push(h("h2", null, "Children"),
+        h("ul", null, p.children.map((c) => h("li", null, h("span", { class: "mono" }, c)))));
+    }
+    if (p.parked && p.parked.length) {
+      out.push(h("h2", null, "Parked"),
+        table(["Flow version", "Label", "Outcome", "Target", "Error", "Transaction"], p.parked.map((r) =>
+          h("tr", null,
+            h("td", { class: "mono" }, r.version),
+            h("td", { class: "mono" }, r.row ? r.row.label : ""),
+            h("td", null, r.row && r.row.outcome ? r.row.outcome.status : r.row ? "parked" : "unknown format"),
+            h("td", { class: "mono" }, r.row && r.row.outcome ? r.row.outcome.target || "" : ""),
+            h("td", null, r.row && r.row.outcome ? r.row.outcome.error || "" : ""),
+            h("td", null, txLink(r.tx_id, true))))));
+    }
+    render(ctx.isCurrent, out);
   }
 
   // ---- Start --------------------------------------------------------------

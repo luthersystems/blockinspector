@@ -71,6 +71,9 @@ All responses are JSON. An error is `{"error": "..."}` with a 4xx status.
 | `GET /v1/keys/history?namespace=NS&key=K` | Each valid write of a key, oldest first, with the value before and after |
 | `GET /v1/framework-keys` | Key and write counts for each framework key space, and for phylum keys |
 | `GET /v1/phylum-versions` | Each phylum version, its status, and each install, update, enable, disable and delete |
+| `GET /v1/flows` | Each DefFlow flow in public state: its runs by state and by what they wait on, parked rows and manifests |
+| `GET /v1/flows/{flow}/runs?namespace=&state=&kind=&label=&phylum=&caller=&q=&limit=50` | The flow's runs, most recently written first. `kind` is what a waiting run waits on (`input`, `connector`, `flow`); `q` matches part of a run ID. `limit` 1 to 1000 |
+| `GET /v1/flows/{flow}/runs/{run}?namespace=` | A run: its header, history, children and parked rows. 404 when the run is not in public state |
 | `GET /v1/stream/blocks` | SSE stream of blocks |
 
 Keys go in the query string, not the path, because substrate keys hold `:`
@@ -178,6 +181,23 @@ From the writes of `luther:phylum:desc:VERSION` (the description
 Each event also has the transaction's `method` (`init`, `update`, `enable`,
 `disable`).
 
+### DefFlow runs
+
+From the keys substrate's DefFlow engine writes with a public store (a
+private store writes only hashes, which the explorer cannot read):
+
+| Key | Shown as |
+|---|---|
+| `luther:flow:run:FLOW:h:RUN` | The run's header. Format 2 is decoded; another format is returned as `raw`, unchanged |
+| `luther:flow:run:FLOW:hist:RUN:N` | A history row: event, from and to label, sender, time, and the transaction that wrote it |
+| `luther:flow:run:FLOW:c:RUN:CHILD` | A child run |
+| `luther:flow:run:FLOW:r:RUN`, `...:v:RUN` | Only `has_result` and `has_vars`. A result and saved locals can hold personal data, so their values are not shown |
+| `luther:flow:park:FLOW:VERSION:RUN` | A parked row and its migration outcome |
+| `luther:flow:man:FLOW:HASH` | A manifest hash |
+
+Only writes of valid transactions count, and a deleted key is gone. A run's
+error shows its reason, kind, label, attempts and message, but not its data.
+
 ## Stream
 
 `GET /v1/stream/blocks` is a `text/event-stream`. Each block is one event:
@@ -223,6 +243,9 @@ sends no transaction.
 | Key history, with a line diff of JSON values | `#/key?namespace=&key=` | `GET /v1/keys/history` |
 | Key spaces | `#/framework` | `GET /v1/framework-keys` |
 | Phylum versions | `#/phylum` | `GET /v1/phylum-versions` |
+| Flows | `#/flows` | `GET /v1/flows` |
+| A flow's runs, filtered | `#/flows/FLOW?namespace=&state=&kind=&label=&phylum=&caller=&q=` | `GET /v1/flows/{flow}/runs` |
+| A run, with its history | `#/flows/FLOW/runs/RUN?namespace=` | `GET /v1/flows/{flow}/runs/{run}` |
 
 The box in the header opens a block (a number) or a transaction (an ID).
 

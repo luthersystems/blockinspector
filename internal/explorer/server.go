@@ -62,6 +62,9 @@ func NewServer(ix *Index, status func() Status, opts ServerOptions) *Server {
 	s.mux.HandleFunc("GET /v1/framework-keys", s.handleFrameworkKeys)
 	s.mux.HandleFunc("GET /v1/phylum-versions", s.handlePhylumVersions)
 	s.mux.HandleFunc("GET /v1/stream/blocks", s.handleStream)
+	s.mux.HandleFunc("GET /v1/flows", s.handleFlows)
+	s.mux.HandleFunc("GET /v1/flows/{flow}/runs", s.handleFlowRuns)
+	s.mux.HandleFunc("GET /v1/flows/{flow}/runs/{run}", s.handleFlowRun)
 	// An unknown API path answers JSON, not the UI's file server.
 	s.mux.HandleFunc("GET /v1/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint: %s", r.URL.Path)
@@ -403,4 +406,48 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// FlowsResponse is the body of GET /v1/flows.
+type FlowsResponse struct {
+	Flows []FlowSummary `json:"flows"`
+}
+
+func (s *Server) handleFlows(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, FlowsResponse{Flows: s.ix.Flows()})
+}
+
+// FlowRunsResponse is the body of GET /v1/flows/{flow}/runs.
+type FlowRunsResponse struct {
+	Runs []FlowRun `json:"runs"`
+}
+
+func (s *Server) handleFlowRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := FlowRunFilter{
+		Namespace: q.Get("namespace"),
+		Flow:      r.PathValue("flow"),
+		State:     q.Get("state"),
+		Kind:      q.Get("kind"),
+		Label:     q.Get("label"),
+		Phylum:    q.Get("phylum"),
+		Caller:    q.Get("caller"),
+		Query:     q.Get("q"),
+	}
+	var err error
+	if f.Limit, err = queryLimit(r, defaultTxLimit, maxTxLimit); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, FlowRunsResponse{Runs: s.ix.FlowRuns(f)})
+}
+
+func (s *Server) handleFlowRun(w http.ResponseWriter, r *http.Request) {
+	flow, run := r.PathValue("flow"), r.PathValue("run")
+	page, ok := s.ix.FlowRun(r.URL.Query().Get("namespace"), flow, run)
+	if !ok {
+		writeError(w, http.StatusNotFound, "run %s of flow %s not found in public state", run, flow)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
 }
