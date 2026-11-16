@@ -33,8 +33,8 @@ type ServerOptions struct {
 	Heartbeat time.Duration
 }
 
-// Server serves the index over HTTP: JSON views under /v1/, and a
-// server-sent events stream of new blocks.
+// Server serves the index over HTTP: JSON views under /v1/, a server-sent
+// events stream of new blocks, and the web UI on /.
 type Server struct {
 	ix     *Index
 	status func() Status
@@ -62,6 +62,11 @@ func NewServer(ix *Index, status func() Status, opts ServerOptions) *Server {
 	s.mux.HandleFunc("GET /v1/framework-keys", s.handleFrameworkKeys)
 	s.mux.HandleFunc("GET /v1/phylum-versions", s.handlePhylumVersions)
 	s.mux.HandleFunc("GET /v1/stream/blocks", s.handleStream)
+	// An unknown API path answers JSON, not the UI's file server.
+	s.mux.HandleFunc("GET /v1/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "no such endpoint: %s", r.URL.Path)
+	})
+	s.mux.Handle("GET /", uiHandler())
 	return s
 }
 
@@ -208,7 +213,8 @@ func (s *Server) handleTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := q.Get("before_index"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 || f.Before == 0 {
+		// With before_index, before=0 is block 0: a page can end inside it.
+		if err != nil || n < 0 || !q.Has("before") {
 			writeError(w, http.StatusBadRequest, "before_index: a non-negative integer, with before")
 			return
 		}

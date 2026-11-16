@@ -264,7 +264,8 @@ type TxFilter struct {
 	Method string
 	// Valid selects valid (true) or invalid (false) transactions; nil is all.
 	Valid *bool
-	// Before selects transactions in blocks below this number; 0 is all.
+	// Before selects transactions in blocks below this number; 0 is all,
+	// unless BeforeIndex is set.
 	Before uint64
 	// BeforeIndex, when set, also selects the transactions of block Before
 	// with an index below it, to continue a page that ended inside a block.
@@ -279,7 +280,7 @@ func (ix *Index) Transactions(f TxFilter) []TxSummary {
 	out := []TxSummary{}
 	end := ix.first + uint64(len(ix.blocks))
 	partial := -1
-	if f.Before != 0 && f.Before < end {
+	if (f.Before != 0 || f.BeforeIndex != nil) && f.Before < end {
 		end = f.Before
 		if f.BeforeIndex != nil && f.Before >= ix.first {
 			end = f.Before + 1

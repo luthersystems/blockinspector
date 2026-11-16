@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Block explorer</title>
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="#/">Block explorer</a>
+  <nav>
+    <a href="#/" data-nav="blocks">Blocks</a>
+    <a href="#/transactions" data-nav="transactions">Transactions</a>
+    <a href="#/keys" data-nav="keys">Keys</a>
+    <a href="#/framework" data-nav="framework">Key spaces</a>
+    <a href="#/phylum" data-nav="phylum">Phylum versions</a>
+  </nav>
+  <form id="search" autocomplete="off">
+    <input id="search-input" type="search" placeholder="Block number or transaction ID" aria-label="Block number or transaction ID">
+  </form>
+</header>
+<div id="status" role="status" aria-live="polite">Connecting…</div>
+<main id="main"><p class="muted">Loading…</p></main>
+</body>
+</html>

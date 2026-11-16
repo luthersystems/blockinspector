@@ -35,7 +35,7 @@ type PvtdataKeys struct {
 
 type Serve struct {
 	Channel     string `optional:"" name:"channel" default:"luther" help:"Channel to read."`
-	Listen      string `optional:"" name:"listen" default:"127.0.0.1:8090" help:"Address the HTTP API listens on."`
+	Listen      string `optional:"" name:"listen" default:"127.0.0.1:8090" help:"Address the explorer (web UI and API) listens on."`
 	AllowOrigin string `optional:"" name:"allow-origin" help:"Send this Access-Control-Allow-Origin, for a UI on another origin."`
 
 	NetworkDir  string `optional:"" name:"network-dir" placeholder:"DIR" help:"fabric-network-builder directory (the one with crypto-config/). Reads the peer live over mutual TLS."`
@@ -61,7 +61,7 @@ var CLI struct {
 	RangeOrderer Range       `cmd:"" help:"Range blocks on orderer ledger."`
 	Snapshot     Snapshot    `cmd:"" help:"Inspect Luther snapshot ledger (Badger DB backup)."`
 	PvtdataKeys  PvtdataKeys `cmd:"" name:"pvtdata-keys" help:"List private data collection keys with version info from peer state DB."`
-	Serve        Serve       `cmd:"" help:"Serve the block explorer API (JSON and a server-sent events stream of new blocks)."`
+	Serve        Serve       `cmd:"" help:"Serve the block explorer: a web UI, and its API (JSON and a server-sent events stream of new blocks)."`
 }
 
 func rangeBlock(orderer bool, dir string, channel string, start uint64, end uint64, outputCSV bool) {

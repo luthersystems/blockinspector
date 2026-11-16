@@ -108,7 +108,7 @@ func serve(cmd Serve) error {
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx) // the open event streams end with the process
 	}()
-	fmt.Fprintf(os.Stderr, "block explorer API on http://%s/v1/status (source %s, channel %s)\n", ln.Addr(), src.Name(), cmd.Channel)
+	fmt.Fprintf(os.Stderr, "block explorer on http://%s/ (API /v1/, source %s, channel %s)\n", ln.Addr(), src.Name(), cmd.Channel)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

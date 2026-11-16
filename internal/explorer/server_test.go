@@ -264,6 +264,17 @@ func TestTransactionsPaging(t *testing.T) {
 	assert.Equal(t, ids, got)
 	getJSON(t, srv, "/v1/transactions?before_index=1", http.StatusBadRequest, nil)
 	getJSON(t, srv, "/v1/transactions?before=2&before_index=-1", http.StatusBadRequest, nil)
+
+	// A page can end inside block 0: its cursor is before=0 with an index,
+	// which selects block 0's earlier transactions, not the tip.
+	var block0 TransactionsResponse
+	getJSON(t, srv, "/v1/transactions?before=0&before_index=1", http.StatusOK, &block0)
+	require.Len(t, block0.Transactions, 1)
+	assert.Equal(t, uint64(0), block0.Transactions[0].BlockNumber)
+	assert.Equal(t, 0, block0.Transactions[0].Index)
+	assert.Nil(t, block0.Next)
+	getJSON(t, srv, "/v1/transactions?before=0&before_index=0", http.StatusOK, &block0)
+	assert.Empty(t, block0.Transactions)
 }
 
 func TestServerPreflight(t *testing.T) {
@@ -275,4 +286,42 @@ func TestServerPreflight(t *testing.T) {
 	defer resp.Body.Close() //nolint:errcheck // test
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	assert.Equal(t, "Last-Event-ID", resp.Header.Get("Access-Control-Allow-Headers"))
+}
+
+func TestServerUI(t *testing.T) {
+	srv := testServer(t, testIndex(t), ServerOptions{})
+
+	for _, tc := range []struct {
+		path, contentType, contains string
+	}{
+		{"/", "text/html; charset=utf-8", `<script src="app.js" defer></script>`},
+		{"/app.js", "text/javascript; charset=utf-8", "/v1/stream/blocks"},
+		{"/app.css", "text/css; charset=utf-8", "--mono"},
+	} {
+		resp, err := http.Get(srv.URL + tc.path)
+		require.NoError(t, err)
+		body := new(strings.Builder)
+		_, err = bufio.NewReader(resp.Body).WriteTo(body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusOK, resp.StatusCode, tc.path)
+		assert.Equal(t, tc.contentType, resp.Header.Get("Content-Type"), tc.path)
+		assert.Equal(t, uiCSP, resp.Header.Get("Content-Security-Policy"), tc.path)
+		assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"), tc.path)
+		assert.Contains(t, body.String(), tc.contains, tc.path)
+	}
+
+	// The UI loads no inline script or style, which the policy refuses.
+	index, err := uiFiles.ReadFile("ui/index.html")
+	require.NoError(t, err)
+	assert.NotContains(t, string(index), "<script>")
+	assert.NotContains(t, string(index), "<style")
+	assert.NotContains(t, string(index), " style=")
+
+	// An unknown API path is a JSON 404, not a UI file.
+	getJSON(t, srv, "/v1/nope", http.StatusNotFound, nil)
+	resp, err := http.Get(srv.URL + "/nope.js")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
