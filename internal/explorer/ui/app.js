@@ -767,10 +767,11 @@
 
   // ---- DefFlow ------------------------------------------------------------
 
-  // A flow header stores Unix seconds.
-  function fmtUnix(sec) {
-    if (!sec) return h("span", { class: "muted" }, "—");
-    return fmtTime(new Date(sec * 1000).toISOString());
+  // A flow header stores Unix nanoseconds.
+  function fmtUnixNano(ns) {
+    if (!ns) return h("span", { class: "muted" }, "—");
+    const d = new Date(Math.floor(ns / 1e6));
+    return isNaN(d.getTime()) ? String(ns) : fmtTime(d.toISOString());
   }
 
   function flowStateBadge(state) {
@@ -818,7 +819,7 @@
       h("td", null, hd ? hd.kind || "" : ""),
       h("td", { class: "mono" }, hd ? hd.phylum || "" : ""),
       h("td", { class: "mono" }, hd ? hd.caller || "" : ""),
-      h("td", null, hd ? fmtUnix(hd.updated_at) : ""),
+      h("td", null, hd ? fmtUnixNano(hd.updated_at) : ""),
       h("td", null, txLink(r.last_write.tx_id, true)));
   }
 
@@ -885,7 +886,7 @@
         ["Label", hd.label ? h("span", { class: "mono" }, hd.label) : null],
         ["Waiting on", hd.kind],
         ["Input from", hd.from && hd.from.length ? hd.from.join(", ") : null],
-        ["Due", hd.due_at ? fmtUnix(hd.due_at) : null],
+        ["Due", hd.due_at ? fmtUnixNano(hd.due_at) : null],
         ["Generation", String(hd.gen)],
         ["History rows", String(hd.hist)],
         ["Inputs", hd.inputs ? String(hd.inputs) : null],
@@ -899,8 +900,8 @@
           h("span", { class: "muted" }, " (" + hd.parent.flow + (hd.parent.label ? ", " + hd.parent.label : "") + ")")] : null],
         ["Child", hd.child ? flowRunLink(hd.child_flow || p.flow, hd.child, p.namespace, false) : null],
         ["Depth", hd.depth ? String(hd.depth) : null],
-        ["Started", fmtUnix(hd.started_at)],
-        ["Updated", fmtUnix(hd.updated_at)],
+        ["Started", fmtUnixNano(hd.started_at)],
+        ["Updated", fmtUnixNano(hd.updated_at)],
         ["Last write", txLink(p.last_write.tx_id, false)],
         ["Result", p.has_result ? h("span", { class: "muted" }, "stored, not shown") : null],
         ["Saved locals", p.has_vars ? h("span", { class: "muted" }, "stored, not shown") : null],
@@ -916,7 +917,8 @@
         ]), h("p", { class: "muted" }, "The error's data is not shown: it can hold personal data."));
       }
     } else {
-      out.push(h("p", { class: "muted" }, "This header has a format this explorer does not know (version " + rawVersion(p.raw) + "). It is shown as stored."),
+      out.push(h("p", { class: "muted" }, "This header has a format this explorer does not know (version " + rawVersion(p.raw) + "). " +
+        "Only its plain fields are shown; the others can hold personal data."),
         h("pre", { class: "value" }, JSON.stringify(p.raw, null, 2)));
     }
     out.push(h("h2", null, "History"),
@@ -933,7 +935,9 @@
       (p.history || []).length ? null : h("p", { class: "muted" }, "No history rows in public state."));
     if (p.children && p.children.length) {
       out.push(h("h2", null, "Children"),
-        h("ul", null, p.children.map((c) => h("li", null, h("span", { class: "mono" }, c)))));
+        h("ul", null, p.children.map((c) => h("li", null,
+          c.flow ? flowRunLink(c.flow, c.run, p.namespace, false) : h("span", { class: "mono" }, c.run),
+          c.flow ? h("span", { class: "muted" }, " (" + c.flow + (c.label ? ", at " + c.label : "") + ")") : null))));
     }
     if (p.parked && p.parked.length) {
       out.push(h("h2", null, "Parked"),

@@ -10,8 +10,8 @@ import (
 // internal/substrate/shiro/libflow/flowstore: record.go, parked.go). A run's
 // records are in the flow's :store. For a flow with a public store the blocks
 // hold them; for a private store (the default) a block holds only hashes, so
-// the explorer shows that flow's public keys (manifests and parked rows) and
-// counts its private writes.
+// the explorer shows only that flow's public keys (manifests and parked
+// rows).
 const (
 	flowRunRoot      = "luther:flow:run:"
 	flowManifestRoot = "luther:flow:man:"
@@ -99,7 +99,8 @@ type flowParkedRow struct {
 
 // FlowRun is a run as the run list and the run page show it. Header is set
 // when the header has the known version; Raw holds a header of another
-// version, or one that does not decode.
+// version, or one that does not decode, reduced by flowRaw to fields that
+// hold no personal data.
 type FlowRun struct {
 	Header    *flowHeader     `json:"header,omitempty"`
 	Raw       json.RawMessage `json:"raw,omitempty"`
@@ -113,12 +114,21 @@ type FlowRun struct {
 type FlowRunPage struct {
 	FlowRun
 	History  []FlowHistoryEntry `json:"history"`
-	Children []string           `json:"children"`
+	Children []FlowChild        `json:"children"`
 	Parked   []FlowParked       `json:"parked"`
 	// HasResult and HasVars say whether the run has a result or saved
 	// locals. Their values are not shown: they can hold personal data.
 	HasResult bool `json:"has_result,omitempty"`
 	HasVars   bool `json:"has_vars,omitempty"`
+}
+
+// FlowChild is a run that a run started (flowstore.ChildLink). Flow is
+// empty when the link does not decode.
+type FlowChild struct {
+	Flow   string `json:"flow,omitempty"`
+	Run    string `json:"run"`
+	Label  string `json:"label,omitempty"`
+	Linked bool   `json:"linked,omitempty"`
 }
 
 // FlowParked is a parked-index row of a run at one flow version.
@@ -188,25 +198,66 @@ func flowManifestKey(key string) (flow, hash string, ok bool) {
 	return flow, hash, ok && flow != "" && hash != ""
 }
 
+// flowRawFields are the top-level fields of a record the explorer cannot
+// decode that it still shows. A record of an unknown format can hold
+// personal data anywhere (error data, a request key, saved values), so only
+// these scalar fields are kept.
+var flowRawFields = map[string]bool{
+	"v": true, "flow": true, "id": true, "state": true, "label": true, "kind": true,
+	"gen": true, "version": true, "manifest": true, "phylum": true, "caller": true,
+	"started_at": true, "updated_at": true, "due_at": true, "hist": true,
+	"status": true, "target": true,
+}
+
+// flowRaw returns what the explorer shows of a record it cannot decode: an
+// object's scalar fields named in flowRawFields, and an "omitted" count of
+// the fields left out. A value that is not a JSON object shows only as
+// {"omitted":1}.
+func flowRaw(b []byte) json.RawMessage {
+	var m map[string]json.RawMessage
+	out := map[string]any{}
+	omitted := 0
+	if json.Unmarshal(b, &m) != nil || m == nil {
+		omitted = 1
+	}
+	for k, v := range m {
+		t := strings.TrimSpace(string(v))
+		if flowRawFields[k] && t != "" && t[0] != '{' && t[0] != '[' {
+			out[k] = v
+		} else {
+			omitted++
+		}
+	}
+	if omitted > 0 {
+		out["omitted"] = omitted
+	}
+	raw, _ := json.Marshal(out)
+	return raw
+}
+
+// flowHeaderVersionOf returns the format version of a header, or -1.
+func flowHeaderVersionOf(b []byte) int {
+	var probe struct {
+		V int `json:"v"`
+	}
+	if json.Unmarshal(b, &probe) != nil {
+		return -1
+	}
+	return probe.V
+}
+
 // decodeFlowRun decodes a header write into a run.
 func decodeFlowRun(namespace, flow, id string, w *KeyWrite) FlowRun {
 	run := FlowRun{Namespace: namespace, Flow: flow, ID: id, LastWrite: w.TxRef}
 	b := w.After.Bytes()
-	var probe struct {
-		V int `json:"v"`
-	}
-	if json.Unmarshal(b, &probe) == nil && probe.V == flowHeaderVersion {
+	if flowHeaderVersionOf(b) == flowHeaderVersion {
 		var h flowHeader
 		if json.Unmarshal(b, &h) == nil {
 			run.Header = &h
 			return run
 		}
 	}
-	if json.Valid(b) {
-		run.Raw = json.RawMessage(b)
-	} else {
-		run.Raw, _ = json.Marshal(string(b))
-	}
+	run.Raw = flowRaw(b)
 	return run
 }
 
@@ -223,12 +274,17 @@ func (ix *Index) liveWrite(k stateKey) *KeyWrite {
 	return w
 }
 
-// flowRuns returns the live runs of every flow, ix.mu held for reading.
-func (ix *Index) flowRuns() []FlowRun {
+// flowRuns returns the live runs of one flow (every flow when flow is
+// empty) on one namespace (every namespace when empty), ix.mu held for
+// reading.
+func (ix *Index) flowRuns(namespace, flowName string) []FlowRun {
 	var runs []FlowRun
 	for k := range ix.history {
+		if namespace != "" && k.namespace != namespace {
+			continue
+		}
 		flow, kind, id, ok := flowRunKey(k.key)
-		if !ok || kind != "h" {
+		if !ok || kind != "h" || (flowName != "" && flow != flowName) {
 			continue
 		}
 		if w := ix.liveWrite(k); w != nil {
@@ -275,7 +331,7 @@ func (ix *Index) Flows() []FlowSummary {
 			get(k.namespace, flow).Parked++
 		}
 	}
-	for _, r := range ix.flowRuns() {
+	for _, r := range ix.flowRuns("", "") {
 		f := get(r.Namespace, r.Flow)
 		f.Runs++
 		if r.Header == nil {
@@ -310,7 +366,7 @@ type FlowRunFilter struct {
 	Label     string
 	Phylum    string
 	Caller    string
-	// Query matches a run ID prefix.
+	// Query matches part of a run ID.
 	Query string
 	Limit int
 }
@@ -320,9 +376,8 @@ func (ix *Index) FlowRuns(f FlowRunFilter) []FlowRun {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()
 	out := []FlowRun{}
-	for _, r := range ix.flowRuns() {
-		if (f.Namespace != "" && r.Namespace != f.Namespace) || (f.Flow != "" && r.Flow != f.Flow) ||
-			(f.Query != "" && !strings.HasPrefix(r.ID, f.Query)) {
+	for _, r := range ix.flowRuns(f.Namespace, f.Flow) {
+		if f.Query != "" && !strings.Contains(r.ID, f.Query) {
 			continue
 		}
 		h := r.Header
@@ -364,20 +419,21 @@ func (ix *Index) FlowRun(namespace, flow, id string) (FlowRunPage, bool) {
 	}
 	ns := page.Namespace
 	page.History = []FlowHistoryEntry{}
-	page.Children = []string{}
+	page.Children = []FlowChild{}
 	page.Parked = []FlowParked{}
-	for k, hist := range ix.history {
+	for k := range ix.history {
 		if k.namespace != ns {
 			continue
 		}
 		if pf, version, run, ok := flowParkedKey(k.key); ok && pf == flow && run == id {
 			if w := ix.liveWrite(k); w != nil {
 				p := FlowParked{Version: version, Run: run, TxRef: w.TxRef}
+				b := w.After.Bytes()
 				var row flowParkedRow
-				if err := json.Unmarshal(w.After.Bytes(), &row); err == nil {
+				if strings.HasPrefix(strings.TrimSpace(string(b)), "{") && json.Unmarshal(b, &row) == nil {
 					p.Row = &row
 				} else {
-					p.Raw, _ = json.Marshal(string(w.After.Bytes()))
+					p.Raw = flowRaw(b)
 				}
 				page.Parked = append(page.Parked, p)
 			}
@@ -393,22 +449,29 @@ func (ix *Index) FlowRun(namespace, flow, id string) (FlowRunPage, bool) {
 			if !ok || run != id {
 				continue
 			}
-			// A history entry is written once; take its first write.
-			for _, w := range hist {
-				if w.IsDelete || w.After == nil {
-					continue
-				}
+			if w := ix.liveWrite(k); w != nil {
 				var e FlowHistoryEntry
 				if json.Unmarshal(w.After.Bytes(), &e) == nil {
 					e.TxRef = w.TxRef
 					page.History = append(page.History, e)
 				}
-				break
 			}
 		case "c":
 			run, child, ok := strings.Cut(rest, ":")
-			if ok && run == id && ix.liveWrite(k) != nil {
-				page.Children = append(page.Children, child)
+			if !ok || run != id {
+				continue
+			}
+			if w := ix.liveWrite(k); w != nil {
+				c := FlowChild{Run: child}
+				var link struct {
+					Flow   string `json:"flow"`
+					Label  string `json:"label"`
+					Linked bool   `json:"linked"`
+				}
+				if json.Unmarshal(w.After.Bytes(), &link) == nil {
+					c.Flow, c.Label, c.Linked = link.Flow, link.Label, link.Linked
+				}
+				page.Children = append(page.Children, c)
 			}
 		case "r":
 			if rest == id && ix.liveWrite(k) != nil {
@@ -421,7 +484,7 @@ func (ix *Index) FlowRun(namespace, flow, id string) (FlowRunPage, bool) {
 		}
 	}
 	sort.Slice(page.History, func(i, j int) bool { return page.History[i].N < page.History[j].N })
-	sort.Strings(page.Children)
+	sort.Slice(page.Children, func(i, j int) bool { return page.Children[i].Run < page.Children[j].Run })
 	sort.Slice(page.Parked, func(i, j int) bool { return page.Parked[i].Version < page.Parked[j].Version })
 	return page, true
 }

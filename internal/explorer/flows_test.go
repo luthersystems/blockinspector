@@ -24,7 +24,7 @@ const (
 
 func flowHeaderJSON(id, state, label, kind string, gen, hist int64, extra string) string {
 	return `{"v":2,"flow":"order","id":"` + id + `","state":"` + state + `","label":"` + label + `","kind":"` + kind +
-		`","gen":` + itoa(gen) + `,"version":"m1","phylum":"v1","caller":"Org1MSP","started_at":1763096400,"updated_at":1763096460` +
+		`","gen":` + itoa(gen) + `,"version":"m1","phylum":"v1","caller":"Org1MSP","started_at":1763096400000000000,"updated_at":1763096460123456789` +
 		extra + `,"hist":` + itoa(hist) + `}`
 }
 
@@ -43,7 +43,7 @@ func flowIndex(t *testing.T) *Index {
 		nil,
 		{{id: "tx-start", request: call("order_start"), code: fabricpeer.TxValidationCode_VALID, writes: []*kvrwset.KVWrite{
 			write("luther:flow:man:order:m1", `{"flow":"order"}`),
-			write(h+flowRun1, flowHeaderJSON(flowRun1, "waiting", "approve", "input", 1, 1, `,"from":["Org1MSP"],"key":"k1"`)),
+			write(h+flowRun1, flowHeaderJSON(flowRun1, "waiting", "approve", "input", 1, 1, `,"from":["Org1MSP"],"key":"k1","due_at":1763100000000000000`)),
 			write(hist+flowRun1+":000000000001", flowHist(1, 1, "start", "", "approve")),
 			write("luther:flow:run:order:v:"+flowRun1, `{"secret":"personal"}`),
 		}}},
@@ -52,7 +52,7 @@ func flowIndex(t *testing.T) *Index {
 				write(h+flowRun1, flowHeaderJSON(flowRun1, "done", "", "", 2, 2, "")),
 				write(hist+flowRun1+":000000000002", flowHist(2, 2, "input", "approve", "done")),
 				write("luther:flow:run:order:r:"+flowRun1, `{"total":5}`),
-				write("luther:flow:run:order:c:"+flowRun1+":"+flowRun3, `{}`),
+				write("luther:flow:run:order:c:"+flowRun1+":"+flowRun3, `{"flow":"payment","run":"`+flowRun3+`","label":"approve"}`),
 			}},
 			{id: "tx-fail", request: call("order_start"), code: fabricpeer.TxValidationCode_VALID, writes: []*kvrwset.KVWrite{
 				write(h+flowRun2, flowHeaderJSON(flowRun2, "failed", "charge", "", 1, 1,
@@ -61,13 +61,18 @@ func flowIndex(t *testing.T) *Index {
 			}},
 			// A header of a newer format is shown raw, not guessed at.
 			{id: "tx-v3", request: call("order_start"), code: fabricpeer.TxValidationCode_VALID, writes: []*kvrwset.KVWrite{
-				write(h+flowRun3, `{"v":3,"flow":"order","id":"`+flowRun3+`","state":"new-state"}`),
+				write(h+flowRun3, `{"v":3,"flow":"order","id":"`+flowRun3+`","state":"new-state","key":"secret-key","error":{"data":{"card":"4111"}}}`),
+				// A history row deleted later is not shown.
+				write(hist+flowRun1+":000000000003", flowHist(3, 3, "input", "done", "done")),
 			}},
 			// A refused transaction's writes are not state.
 			{id: "tx-bad", request: call("order_start"), code: fabricpeer.TxValidationCode_MVCC_READ_CONFLICT, writes: []*kvrwset.KVWrite{
 				write(h+"ffffffffffffffffffffffffffffffff", flowHeaderJSON("ffffffffffffffffffffffffffffffff", "waiting", "x", "input", 1, 0, "")),
 			}},
 		},
+		{{id: "tx-purge", request: call("order_purge"), code: fabricpeer.TxValidationCode_VALID, writes: []*kvrwset.KVWrite{
+			del(hist + flowRun1 + ":000000000003"),
+		}}},
 	}
 	for i, txs := range blocks {
 		require.NoError(t, ix.Add(testBlock(t, uint64(i), txs...))) //nolint:gosec // G115: small test index
@@ -96,6 +101,15 @@ func TestFlowKeys(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "order", flow)
 	require.Equal(t, "m1", hash)
+}
+
+func TestFlowRaw(t *testing.T) {
+	require.JSONEq(t, `{"omitted":1}`, string(flowRaw([]byte(`not json`))))
+	require.JSONEq(t, `{"omitted":1}`, string(flowRaw([]byte(`["x"]`))))
+	require.JSONEq(t, `{"omitted":1}`, string(flowRaw([]byte(`null`))))
+	require.JSONEq(t, `{"state":"done","omitted":2}`,
+		string(flowRaw([]byte(`{"state":"done","label":{"x":1},"message":"personal"}`))),
+		"only named scalar fields are kept")
 }
 
 func TestFlows(t *testing.T) {
@@ -136,7 +150,10 @@ func TestFlowRuns(t *testing.T) {
 	raw := ix.FlowRuns(FlowRunFilter{Flow: "order", Query: flowRun3})
 	require.Len(t, raw, 1)
 	require.Nil(t, raw[0].Header)
-	require.JSONEq(t, `{"v":3,"flow":"order","id":"`+flowRun3+`","state":"new-state"}`, string(raw[0].Raw))
+	require.JSONEq(t, `{"v":3,"flow":"order","id":"`+flowRun3+`","state":"new-state","omitted":2}`, string(raw[0].Raw),
+		"a header of an unknown format keeps only fields that hold no personal data")
+	require.NotContains(t, string(raw[0].Raw), "4111")
+	require.Len(t, ix.FlowRuns(FlowRunFilter{Flow: "order", Query: "89abcdef0123"}), 1, "q matches part of a run ID")
 }
 
 func TestFlowRunPage(t *testing.T) {
@@ -150,7 +167,7 @@ func TestFlowRunPage(t *testing.T) {
 	require.Equal(t, "input", page.History[1].Event)
 	require.Equal(t, "approve", page.History[1].From)
 	require.Equal(t, "tx-input", page.History[1].TxID)
-	require.Equal(t, []string{flowRun3}, page.Children)
+	require.Equal(t, []FlowChild{{Flow: "payment", Run: flowRun3, Label: "approve"}}, page.Children)
 	require.True(t, page.HasResult)
 	require.True(t, page.HasVars)
 

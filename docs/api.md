@@ -188,9 +188,9 @@ private store writes only hashes, which the explorer cannot read):
 
 | Key | Shown as |
 |---|---|
-| `luther:flow:run:FLOW:h:RUN` | The run's header. Format 2 is decoded; another format is returned as `raw`, unchanged |
+| `luther:flow:run:FLOW:h:RUN` | The run's header. Format 2 is decoded. A header of another format, or one that does not decode, is returned as `raw` with only its plain fields that hold no personal data (`v`, `flow`, `id`, `state`, `label`, `kind`, times and versions) and `omitted`, the number of fields left out. Times are Unix nanoseconds |
 | `luther:flow:run:FLOW:hist:RUN:N` | A history row: event, from and to label, sender, time, and the transaction that wrote it |
-| `luther:flow:run:FLOW:c:RUN:CHILD` | A child run |
+| `luther:flow:run:FLOW:c:RUN:CHILD` | A child run, with its flow and the label that started it |
 | `luther:flow:run:FLOW:r:RUN`, `...:v:RUN` | Only `has_result` and `has_vars`. A result and saved locals can hold personal data, so their values are not shown |
 | `luther:flow:park:FLOW:VERSION:RUN` | A parked row and its migration outcome |
 | `luther:flow:man:FLOW:HASH` | A manifest hash |
