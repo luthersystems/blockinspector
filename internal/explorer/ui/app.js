@@ -341,6 +341,8 @@
     [/^\/flows\/([^/]+)\/runs\/([^/]+)$/, "flows", pageFlowRun],
     [/^\/batches$/, "batches", pageBatches],
     [/^\/batch$/, "batches", pageBatchQueue],
+    [/^\/connector$/, "connector", pageConnector],
+    [/^\/connector\/(.+)$/, "connector", pageConnectorRequest],
   ];
 
   async function route() {
@@ -1033,6 +1035,98 @@
           h("td", null, txLink(f.removed.tx_id, true)),
           h("td", { class: "mono" }, f.removed.method || "")))),
       p.finished.length ? null : h("p", { class: "muted" }, "None."));
+  }
+
+
+  // ---- Connector Hub ------------------------------------------------------
+
+  function connectorState(r) {
+    if (!r.has_callback) return h("span", { class: "badge" }, "no callback");
+    if (r.reply) return h("span", { class: "badge ok" }, "replied");
+    if (r.dropped) return h("span", { class: "badge bad", title: "The callback state was purged without a reply, for example by a flow timeout" }, "dropped");
+    return h("span", { class: "badge warn" }, "open");
+  }
+
+  function fmtMS(ms) {
+    if (ms === undefined || ms === null) return "";
+    return ms < 1000 ? ms + " ms" : (ms / 1000).toFixed(1) + " s";
+  }
+
+  function bodyText(r) {
+    if (!r.body) return h("span", { class: "muted", title: "Stored at a key other than the request id" }, "other key");
+    return r.body === "private" ? "private (" + r.collection + ")" : "public";
+  }
+
+  function connectorRequestLink(rid) {
+    return h("a", { href: hashLink("/connector/" + encodeURIComponent(rid)), class: "mono", title: rid },
+      rid.length > 16 ? rid.slice(0, 13) + "…" : rid);
+  }
+
+  async function pageConnector(ctx) {
+    const state = ctx.query.get("state") || "";
+    const q = ctx.query.get("q") || "";
+    const data = await api("/v1/connector/requests", { state: state, q: q, limit: 200 });
+    const sum = data.summary;
+    const stateSel = h("select", { name: "state" },
+      [["", "all"], ["open", "open"], ["replied", "replied"], ["dropped", "dropped"], ["no-callback", "no callback"]]
+        .map(([v, l]) => h("option", { value: v }, l)));
+    stateSel.value = state;
+    const qIn = h("input", { type: "text", value: q, placeholder: "part of an id", name: "q" });
+    const form = h("form", { class: "filters" },
+      h("label", null, "State", stateSel),
+      h("label", null, "Request ID", qIn),
+      h("button", { type: "submit" }, "Filter"));
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      go(hashLink("/connector", { state: stateSel.value, q: qIn.value.trim() }));
+    });
+    render(ctx.isCurrent,
+      h("h1", null, "Connector requests"),
+      h("p", { class: "muted" }, "Connector events that transactions raised. A request with a callback is open until a $ch_callback transaction purges its callback state (replied), or another transaction does, such as a flow timeout (dropped). A handler that fails commits nothing, so its request stays open. Request bodies are not shown."),
+      fields([
+        ["Requests", String(sum.requests)],
+        ["Open", String(sum.open) + (sum.oldest_open ? " (oldest raised " + new Date(sum.oldest_open).toLocaleString() + ")" : "")],
+        ["Replied", String(sum.replied)],
+        ["Dropped", String(sum.dropped)],
+        ["No callback", String(sum.no_callback)],
+      ]),
+      form,
+      table(["Request", "State", "Raised by", "Method", "Raised", "Body", "Closed by", "#Latency", "Flow run"], data.requests.map((r) =>
+        h("tr", null,
+          h("td", null, connectorRequestLink(r.rid)),
+          h("td", null, connectorState(r)),
+          h("td", null, txLink(r.raised.tx_id, true)),
+          h("td", { class: "mono" }, r.raised.method || ""),
+          h("td", null, fmtTime(r.raised.time)),
+          h("td", null, bodyText(r)),
+          h("td", null, r.reply ? txLink(r.reply.tx_id, true) : r.dropped ? txLink(r.dropped.tx_id, true) : ""),
+          h("td", { class: "num" }, fmtMS(r.latency_ms)),
+          h("td", null, r.flow ? flowRunLink(r.flow.flow, r.flow.run, "", true) : "")))),
+      data.requests.length ? null : h("p", { class: "muted" }, "No requests match."),
+      data.requests.length >= 200 ? h("p", { class: "muted" }, "Showing the 200 most recent. Filter to narrow the list.") : null);
+  }
+
+  async function pageConnectorRequest(ctx) {
+    const rid = decodeURIComponent(ctx.match[1]);
+    const r = await api("/v1/connector/requests/" + encodeURIComponent(rid));
+    render(ctx.isCurrent,
+      h("h1", null, "Connector request ", h("span", { class: "mono break" }, r.rid)),
+      h("p", null, h("a", { href: hashLink("/connector") }, "All requests")),
+      fields([
+        ["State", connectorState(r)],
+        ["Namespace", h("span", { class: "mono" }, r.namespace)],
+        ["Raised by", [txLink(r.raised.tx_id, false), " (event " + r.event + ")"]],
+        ["Method", r.raised.method ? h("span", { class: "mono" }, r.raised.method) : null],
+        ["Raised", fmtTime(r.raised.time)],
+        ["Body", [bodyText(r), h("span", { class: "muted" }, " · not shown: a request can hold personal data")]],
+        ["Callback", r.has_callback ? "registered" : "none: nothing waits for a reply"],
+        ["Reply", r.reply ? txLink(r.reply.tx_id, false) : null],
+        ["Replied", r.reply ? fmtTime(r.reply.time) : null],
+        ["Latency", r.latency_ms !== undefined ? fmtMS(r.latency_ms) : null],
+        ["Dropped by", r.dropped ? [txLink(r.dropped.tx_id, false), r.dropped.method ? h("span", { class: "muted" }, " (" + r.dropped.method + ")") : null] : null],
+        ["Flow run", r.flow ? flowRunLink(r.flow.flow, r.flow.run, "", false) : null],
+      ]),
+      r.has_callback && !r.reply && !r.dropped ? h("p", { class: "muted" }, "No valid transaction has purged this request's callback state yet.") : null);
   }
 
   // ---- Start --------------------------------------------------------------

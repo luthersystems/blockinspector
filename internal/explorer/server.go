@@ -67,6 +67,8 @@ func NewServer(ix *Index, status func() Status, opts ServerOptions) *Server {
 	s.mux.HandleFunc("GET /v1/flows/{flow}/runs/{run}", s.handleFlowRun)
 	s.mux.HandleFunc("GET /v1/batches", s.handleBatches)
 	s.mux.HandleFunc("GET /v1/batches/queue", s.handleBatchQueue)
+	s.mux.HandleFunc("GET /v1/connector/requests", s.handleConnectorRequests)
+	s.mux.HandleFunc("GET /v1/connector/requests/{rid}", s.handleConnectorRequest)
 	// An unknown API path answers JSON, not the UI's file server.
 	s.mux.HandleFunc("GET /v1/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint: %s", r.URL.Path)
@@ -482,4 +484,38 @@ func (s *Server) handleBatchQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+// ConnectorRequestsResponse is the body of GET /v1/connector/requests.
+type ConnectorRequestsResponse struct {
+	Requests []ConnectorRequest `json:"requests"`
+	Summary  ConnectorSummary   `json:"summary"`
+}
+
+var connectorStates = map[string]bool{"": true, "open": true, "replied": true, "dropped": true, "no-callback": true}
+
+func (s *Server) handleConnectorRequests(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := ConnectorFilter{State: q.Get("state"), Query: q.Get("q")}
+	if !connectorStates[f.State] {
+		writeError(w, http.StatusBadRequest, "state must be open, replied, dropped or no-callback")
+		return
+	}
+	var err error
+	if f.Limit, err = queryLimit(r, defaultTxLimit, maxTxLimit); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	reqs, sum := s.ix.ConnectorRequests(f)
+	writeJSON(w, http.StatusOK, ConnectorRequestsResponse{Requests: reqs, Summary: sum})
+}
+
+func (s *Server) handleConnectorRequest(w http.ResponseWriter, r *http.Request) {
+	rid := r.PathValue("rid")
+	req, ok := s.ix.ConnectorRequest(r.URL.Query().Get("namespace"), rid)
+	if !ok {
+		writeError(w, http.StatusNotFound, "connector request %s not found", rid)
+		return
+	}
+	writeJSON(w, http.StatusOK, req)
 }

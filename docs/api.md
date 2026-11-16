@@ -76,6 +76,8 @@ All responses are JSON. An error is `{"error": "..."}` with a 4xx status.
 | `GET /v1/flows/{flow}/runs/{run}?namespace=` | A run: its header, history, children and parked rows. 404 when the run is not in public state |
 | `GET /v1/batches` | Each batch queue: prepared and due items, the oldest due time, pending batches, and whether app control pauses batching |
 | `GET /v1/batches/queue?namespace=&name=Q` | One queue: its prepared items (earliest due first), pending batches, and the last 200 items that left it with their outcome. 404 when no key of the queue is live |
+| `GET /v1/connector/requests?state=&q=&limit=50` | Connector requests, most recent first, and counts of all of them. `state` is `open`, `replied`, `dropped` or `no-callback`; `q` matches part of a request id |
+| `GET /v1/connector/requests/{rid}` | One connector request |
 | `GET /v1/stream/blocks` | SSE stream of blocks |
 
 Keys go in the query string, not the path, because substrate keys hold `:`
@@ -221,6 +223,31 @@ or not a JSON object; only when the transaction calls nothing else), and
 returns `undecodable_keys`, the live keys under `luther:batch:` of no known
 form.
 
+### Connector requests
+
+From the transactions that raise connector events (substrate
+`libframework/connectorevents.go`). Such a transaction sets the chaincode
+event `luther`, whose payload is a JSON object of strings with one entry
+`luther:ev:N` per event, `{"rid": REQUEST ID}`. Only valid transactions count.
+
+| Field | From |
+|---|---|
+| `body` | `public` when the raise wrote the request id in public state, `private` (and `collection`) when it wrote a private key whose hash is the request id's. Empty when the event named another key. The body itself is not shown |
+| `has_callback` | The raise wrote `luther:cr:RID` in collection `private` (a handler is registered) |
+| `reply`, `latency_ms` | The later valid `$ch_callback` transaction that deleted or purged `luther:cr:RID`: it handed the reply to the handler |
+| `dropped` | A later valid transaction of another method that purged `luther:cr:RID`, such as a DefFlow timeout, cancel or retry: no reply was handled |
+| `flow` | The DefFlow run whose header listed the request id in `rids` (a flow with a public store). A header drops its rids when the run stops waiting, so the explorer keeps the last run seen |
+
+A handler that fails commits nothing, so its request stays open. A reused
+request id (a reused csprng seed) is a new request; the detail endpoint
+returns the latest one.
+
+A block holds only the SHA-256 of a private key, so the explorer matches
+private writes by the hash of the key it expects. The system, object id and
+MSP of a request are in its private callback state, so they do not show.
+Fabric keeps one chaincode event per transaction, the last one set, so a
+raise in a transaction that later sets its own event does not show.
+
 ## Stream
 
 `GET /v1/stream/blocks` is a `text/event-stream`. Each block is one event:
@@ -271,6 +298,8 @@ sends no transaction.
 | A run, with its history | `#/flows/FLOW/runs/RUN?namespace=` | `GET /v1/flows/{flow}/runs/{run}` |
 | Batch queues | `#/batches` | `GET /v1/batches` |
 | A batch queue | `#/batch?namespace=&name=` | `GET /v1/batches/queue` |
+| Connector requests, filtered | `#/connector?state=&q=` | `GET /v1/connector/requests` |
+| A connector request | `#/connector/RID` | `GET /v1/connector/requests/{rid}` |
 
 The box in the header opens a block (a number) or a transaction (an ID).
 

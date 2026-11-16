@@ -115,7 +115,7 @@ curl -s localhost:8090/v1/blocks
 curl -sN localhost:8090/v1/stream/blocks
 ```
 
-This command pulls the channel's blocks from a peer's deliver service over mutual TLS, with the network's own client identity from `crypto-config/`, so it works with peers that require client TLS. It serves JSON views of blocks, transactions, key history, framework keys, phylum versions, DefFlow runs and batch queues, and streams new blocks as server-sent events. A web UI on `/` shows the same views and follows new blocks. `--ledger-dir` serves block files offline instead. See [docs/api.md](docs/api.md).
+This command pulls the channel's blocks from a peer's deliver service over mutual TLS, with the network's own client identity from `crypto-config/`, so it works with peers that require client TLS. It serves JSON views of blocks, transactions, key history, framework keys, phylum versions, DefFlow runs, batch queues and connector requests, and streams new blocks as server-sent events. A web UI on `/` shows the same views and follows new blocks. `--ledger-dir` serves block files offline instead. See [docs/api.md](docs/api.md).
 
 ### Parameters
 
