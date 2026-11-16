@@ -62,6 +62,13 @@ func NewServer(ix *Index, status func() Status, opts ServerOptions) *Server {
 	s.mux.HandleFunc("GET /v1/framework-keys", s.handleFrameworkKeys)
 	s.mux.HandleFunc("GET /v1/phylum-versions", s.handlePhylumVersions)
 	s.mux.HandleFunc("GET /v1/stream/blocks", s.handleStream)
+	s.mux.HandleFunc("GET /v1/flows", s.handleFlows)
+	s.mux.HandleFunc("GET /v1/flows/{flow}/runs", s.handleFlowRuns)
+	s.mux.HandleFunc("GET /v1/flows/{flow}/runs/{run}", s.handleFlowRun)
+	s.mux.HandleFunc("GET /v1/batches", s.handleBatches)
+	s.mux.HandleFunc("GET /v1/batches/queue", s.handleBatchQueue)
+	s.mux.HandleFunc("GET /v1/connector/requests", s.handleConnectorRequests)
+	s.mux.HandleFunc("GET /v1/connector/requests/{rid}", s.handleConnectorRequest)
 	// An unknown API path answers JSON, not the UI's file server.
 	s.mux.HandleFunc("GET /v1/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint: %s", r.URL.Path)
@@ -403,4 +410,112 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// FlowsResponse is the body of GET /v1/flows.
+type FlowsResponse struct {
+	Flows []FlowSummary `json:"flows"`
+}
+
+func (s *Server) handleFlows(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, FlowsResponse{Flows: s.ix.Flows()})
+}
+
+// FlowRunsResponse is the body of GET /v1/flows/{flow}/runs.
+type FlowRunsResponse struct {
+	Runs []FlowRun `json:"runs"`
+}
+
+func (s *Server) handleFlowRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := FlowRunFilter{
+		Namespace: q.Get("namespace"),
+		Flow:      r.PathValue("flow"),
+		State:     q.Get("state"),
+		Kind:      q.Get("kind"),
+		Label:     q.Get("label"),
+		Phylum:    q.Get("phylum"),
+		Caller:    q.Get("caller"),
+		Query:     q.Get("q"),
+	}
+	var err error
+	if f.Limit, err = queryLimit(r, defaultTxLimit, maxTxLimit); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, FlowRunsResponse{Runs: s.ix.FlowRuns(f)})
+}
+
+func (s *Server) handleFlowRun(w http.ResponseWriter, r *http.Request) {
+	flow, run := r.PathValue("flow"), r.PathValue("run")
+	page, ok := s.ix.FlowRun(r.URL.Query().Get("namespace"), flow, run)
+	if !ok {
+		writeError(w, http.StatusNotFound, "run %s of flow %s not found in public state", run, flow)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// BatchesResponse is the body of GET /v1/batches.
+type BatchesResponse struct {
+	Queues []BatchQueue `json:"queues"`
+	// UndecodableKeys counts live keys under luther:batch: of no known
+	// form. They are in no queue.
+	UndecodableKeys int `json:"undecodable_keys,omitempty"`
+}
+
+func (s *Server) handleBatches(w http.ResponseWriter, r *http.Request) {
+	queues, undecodable := s.ix.BatchQueues()
+	writeJSON(w, http.StatusOK, BatchesResponse{Queues: queues, UndecodableKeys: undecodable})
+}
+
+// handleBatchQueue serves one queue. The name is a query parameter, as a
+// key is: a queue name can hold any byte.
+func (s *Server) handleBatchQueue(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	name := q.Get("name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	page, ok := s.ix.BatchQueue(q.Get("namespace"), name)
+	if !ok {
+		writeError(w, http.StatusNotFound, "batch queue %s not found", name)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// ConnectorRequestsResponse is the body of GET /v1/connector/requests.
+type ConnectorRequestsResponse struct {
+	Requests []ConnectorRequest `json:"requests"`
+	Summary  ConnectorSummary   `json:"summary"`
+}
+
+var connectorStates = map[string]bool{"": true, "open": true, "replied": true, "dropped": true, "no-callback": true}
+
+func (s *Server) handleConnectorRequests(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := ConnectorFilter{State: q.Get("state"), Query: q.Get("q")}
+	if !connectorStates[f.State] {
+		writeError(w, http.StatusBadRequest, "state must be open, replied, dropped or no-callback")
+		return
+	}
+	var err error
+	if f.Limit, err = queryLimit(r, defaultTxLimit, maxTxLimit); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	reqs, sum := s.ix.ConnectorRequests(f)
+	writeJSON(w, http.StatusOK, ConnectorRequestsResponse{Requests: reqs, Summary: sum})
+}
+
+func (s *Server) handleConnectorRequest(w http.ResponseWriter, r *http.Request) {
+	rid := r.PathValue("rid")
+	req, ok := s.ix.ConnectorRequest(r.URL.Query().Get("namespace"), rid)
+	if !ok {
+		writeError(w, http.StatusNotFound, "connector request %s not found", rid)
+		return
+	}
+	writeJSON(w, http.StatusOK, req)
 }

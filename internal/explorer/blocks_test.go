@@ -24,6 +24,10 @@ type testTx struct {
 	reads   []*kvrwset.KVRead
 	private []*rwset.CollectionHashedReadWriteSet
 	code    fabricpeer.TxValidationCode
+	// event and response are the payloads of the "luther" chaincode event
+	// and of the response; empty for the defaults.
+	event    string
+	response string
 }
 
 const testNamespace = "substrate"
@@ -53,11 +57,18 @@ func testEnvelope(t *testing.T, num uint64, tx testTx) []byte {
 			CollectionHashedRwset: tx.private,
 		}},
 	})
+	event, response := tx.event, tx.response
+	if event == "" {
+		event = `{}`
+	}
+	if response == "" {
+		response = `{"ok":true}`
+	}
 	action := mustMarshal(t, &fabricpeer.ChaincodeAction{
 		Results:     results,
-		Response:    &fabricpeer.Response{Status: 200, Payload: []byte(`{"ok":true}`)},
+		Response:    &fabricpeer.Response{Status: 200, Payload: []byte(response)},
 		ChaincodeId: &fabricpeer.ChaincodeID{Name: testNamespace},
-		Events:      mustMarshal(t, &fabricpeer.ChaincodeEvent{ChaincodeId: testNamespace, TxId: tx.id, EventName: "luther", Payload: []byte(`{}`)}),
+		Events:      mustMarshal(t, &fabricpeer.ChaincodeEvent{ChaincodeId: testNamespace, TxId: tx.id, EventName: "luther", Payload: []byte(event)}),
 	})
 	prp := mustMarshal(t, &fabricpeer.ProposalResponsePayload{ProposalHash: []byte("h"), Extension: action})
 	var args [][]byte

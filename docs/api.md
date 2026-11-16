@@ -71,6 +71,13 @@ All responses are JSON. An error is `{"error": "..."}` with a 4xx status.
 | `GET /v1/keys/history?namespace=NS&key=K` | Each valid write of a key, oldest first, with the value before and after |
 | `GET /v1/framework-keys` | Key and write counts for each framework key space, and for phylum keys |
 | `GET /v1/phylum-versions` | Each phylum version, its status, and each install, update, enable, disable and delete |
+| `GET /v1/flows` | Each DefFlow flow in public state: its runs by state and by what they wait on, parked rows and manifests |
+| `GET /v1/flows/{flow}/runs?namespace=&state=&kind=&label=&phylum=&caller=&q=&limit=50` | The flow's runs, most recently written first. `kind` is what a waiting run waits on (`input`, `connector`, `flow`); `q` matches part of a run ID. `limit` 1 to 1000 |
+| `GET /v1/flows/{flow}/runs/{run}?namespace=` | A run: its header, history, children and parked rows. 404 when the run is not in public state |
+| `GET /v1/batches` | Each batch queue: prepared and due items, the oldest due time, pending batches, and whether app control pauses batching |
+| `GET /v1/batches/queue?namespace=&name=Q` | One queue: its prepared items (earliest due first), pending batches, and the last 200 items that left it with their outcome. 404 when no key of the queue is live |
+| `GET /v1/connector/requests?state=&q=&limit=50` | Connector requests, most recent first, and counts of all of them. `state` is `open`, `replied`, `dropped` or `no-callback`; `q` matches part of a request id |
+| `GET /v1/connector/requests/{rid}` | One connector request |
 | `GET /v1/stream/blocks` | SSE stream of blocks |
 
 Keys go in the query string, not the path, because substrate keys hold `:`
@@ -178,6 +185,69 @@ From the writes of `luther:phylum:desc:VERSION` (the description
 Each event also has the transaction's `method` (`init`, `update`, `enable`,
 `disable`).
 
+### DefFlow runs
+
+From the keys substrate's DefFlow engine writes with a public store (a
+private store writes only hashes, which the explorer cannot read):
+
+| Key | Shown as |
+|---|---|
+| `luther:flow:run:FLOW:h:RUN` | The run's header. Format 2 is decoded. A header of another format, or one that does not decode, is returned as `raw` with only its plain fields that hold no personal data (`v`, `flow`, `id`, `state`, `label`, `kind`, times and versions) and `omitted`, the number of fields left out. Times are Unix nanoseconds |
+| `luther:flow:run:FLOW:hist:RUN:N` | A history row: event, from and to label, sender, time, and the transaction that wrote it |
+| `luther:flow:run:FLOW:c:RUN:CHILD` | A child run, with its flow and the label that started it |
+| `luther:flow:run:FLOW:r:RUN`, `...:v:RUN` | Only `has_result` and `has_vars`. A result and saved locals can hold personal data, so their values are not shown |
+| `luther:flow:park:FLOW:VERSION:RUN` | A parked row and its migration outcome |
+| `luther:flow:man:FLOW:HASH` | A manifest hash |
+
+Only writes of valid transactions count, and a deleted key is gone. A run's
+error shows its reason, kind, label, attempts and message, but not its data.
+
+### Batches
+
+From substrate's batch keys (`libframework/batch.go`):
+
+| Key | Shown as |
+|---|---|
+| `luther:batch:queue:NAME` | `created`: init made the queue |
+| `luther:batch:item:NAME~TIME~ID` | A prepared item, due at TIME (Unix seconds plus 2^63, in hex). It is `due` once TIME is at or before the latest block's time, not the wall clock |
+| `luther:batch:pending:NAME~BATCH` | A pending batch and its item ids |
+| `luther:batchreq:ID` | Only `has_request`. A request can hold personal data |
+| `luther:app_control` | `paused`, from its `BATCHING_PAUSED` property |
+
+NAME, ID and BATCH are unescaped (`%` and two hex digits). An item key that a
+valid transaction deleted is a finished item: `collected` when the same
+transaction wrote a pending batch of the queue that lists it, `skipped` when a
+`batch_get_requests` call removed it otherwise (its request record was missing
+or not a JSON object; only when the transaction calls nothing else), and
+`removed` for any other delete, such as a reinit. `GET /v1/batches` also
+returns `undecodable_keys`, the live keys under `luther:batch:` of no known
+form.
+
+### Connector requests
+
+From the transactions that raise connector events (substrate
+`libframework/connectorevents.go`). Such a transaction sets the chaincode
+event `luther`, whose payload is a JSON object of strings with one entry
+`luther:ev:N` per event, `{"rid": REQUEST ID}`. Only valid transactions count.
+
+| Field | From |
+|---|---|
+| `body` | `public` when the raise wrote the request id in public state, `private` (and `collection`) when it wrote a private key whose hash is the request id's. Empty when the event named another key. The body itself is not shown |
+| `has_callback` | The raise wrote `luther:cr:RID` in collection `private` (a handler is registered) |
+| `reply`, `latency_ms` | The later valid `$ch_callback` transaction that deleted or purged `luther:cr:RID`: it handed the reply to the handler |
+| `dropped` | A later valid transaction of another method that purged `luther:cr:RID`, such as a DefFlow timeout, cancel or retry: no reply was handled |
+| `flow` | The DefFlow run whose header listed the request id in `rids` (a flow with a public store). A header drops its rids when the run stops waiting, so the explorer keeps the last run seen |
+
+A handler that fails commits nothing, so its request stays open. A reused
+request id (a reused csprng seed) is a new request; the detail endpoint
+returns the latest one.
+
+A block holds only the SHA-256 of a private key, so the explorer matches
+private writes by the hash of the key it expects. The system, object id and
+MSP of a request are in its private callback state, so they do not show.
+Fabric keeps one chaincode event per transaction, the last one set, so a
+raise in a transaction that later sets its own event does not show.
+
 ## Stream
 
 `GET /v1/stream/blocks` is a `text/event-stream`. Each block is one event:
@@ -223,6 +293,13 @@ sends no transaction.
 | Key history, with a line diff of JSON values | `#/key?namespace=&key=` | `GET /v1/keys/history` |
 | Key spaces | `#/framework` | `GET /v1/framework-keys` |
 | Phylum versions | `#/phylum` | `GET /v1/phylum-versions` |
+| Flows | `#/flows` | `GET /v1/flows` |
+| A flow's runs, filtered | `#/flows/FLOW?namespace=&state=&kind=&label=&phylum=&caller=&q=` | `GET /v1/flows/{flow}/runs` |
+| A run, with its history | `#/flows/FLOW/runs/RUN?namespace=` | `GET /v1/flows/{flow}/runs/{run}` |
+| Batch queues | `#/batches` | `GET /v1/batches` |
+| A batch queue | `#/batch?namespace=&name=` | `GET /v1/batches/queue` |
+| Connector requests, filtered | `#/connector?state=&q=` | `GET /v1/connector/requests` |
+| A connector request | `#/connector/RID` | `GET /v1/connector/requests/{rid}` |
 
 The box in the header opens a block (a number) or a transaction (an ID).
 

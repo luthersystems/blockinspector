@@ -19,8 +19,10 @@ type Index struct {
 	history map[stateKey][]*KeyWrite
 	phylum  map[stateKey]*PhylumVersion
 	changed chan struct{}
-	channel string
-	blocks  []*decodedBlock
+	// connector holds the connector requests (connector.go).
+	connector connectorIndex
+	channel   string
+	blocks    []*decodedBlock
 	// phylumOrder lists phylum versions in the order they were installed.
 	phylumOrder []stateKey
 	first       uint64
@@ -49,11 +51,12 @@ type KeyWrite struct {
 // NewIndex returns an empty index for a channel.
 func NewIndex(channel string) *Index {
 	return &Index{
-		channel: channel,
-		txByID:  map[string]txLoc{},
-		history: map[stateKey][]*KeyWrite{},
-		phylum:  map[stateKey]*PhylumVersion{},
-		changed: make(chan struct{}),
+		channel:   channel,
+		txByID:    map[string]txLoc{},
+		history:   map[stateKey][]*KeyWrite{},
+		phylum:    map[stateKey]*PhylumVersion{},
+		changed:   make(chan struct{}),
+		connector: newConnectorIndex(),
 	}
 }
 
@@ -112,6 +115,7 @@ func (ix *Index) Add(blk *cb.Block) error {
 		}
 		if tx.Valid {
 			ix.applyWrites(tx)
+			ix.applyConnector(tx)
 		}
 	}
 	close(ix.changed)
@@ -252,11 +256,8 @@ func (ix *Index) Block(num uint64) (Block, bool) {
 func (ix *Index) Transaction(id string) (*Transaction, bool) {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()
-	loc, ok := ix.txByID[id]
-	if !ok {
-		return nil, false
-	}
-	return ix.blocks[loc.block].txs[loc.tx], true
+	tx := ix.txLocked(id)
+	return tx, tx != nil
 }
 
 // TxFilter selects transactions.
