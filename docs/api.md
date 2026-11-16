@@ -5,7 +5,8 @@ with a server-sent events (SSE) stream of new blocks. It reads blocks only:
 it sends no transaction.
 
 This is the backend of the explorer in luthersystems/blockinspector#25. The
-UI is luthersystems/blockinspector#30.
+same server serves the web UI (luthersystems/blockinspector#30) on `/`: open
+`http://127.0.0.1:8090/`. See "Web UI" below.
 
 ## Sources
 
@@ -204,3 +205,31 @@ reads from the index at its own pace.
 `--allow-origin` sets `Access-Control-Allow-Origin`, for a UI served from
 another origin, and answers a preflight `OPTIONS` request. The API has no authentication, so it listens on 127.0.0.1 by
 default.
+
+## Web UI
+
+The server serves a web UI on `/`, from files embedded in the binary
+(`internal/explorer/ui`). It reads only this API, from its own origin, and
+sends no transaction.
+
+| Page | Route | API |
+|---|---|---|
+| Status bar (every page) | | `GET /v1/status`, every 5 s |
+| Blocks, newest first; new blocks appear at the top | `#/` | `GET /v1/blocks`, `GET /v1/stream/blocks?from=` |
+| Block and its transactions | `#/blocks/N` | `GET /v1/blocks/{number}` |
+| Transactions, filtered by method and validity | `#/transactions?method=&valid=` | `GET /v1/transactions` |
+| Transaction | `#/tx/ID` | `GET /v1/transactions/{id}` |
+| Keys: all, phylum, framework, or one space | `#/keys?kind=&space=&namespace=&prefix=` | `GET /v1/keys` |
+| Key history, with a line diff of JSON values | `#/key?namespace=&key=` | `GET /v1/keys/history` |
+| Key spaces | `#/framework` | `GET /v1/framework-keys` |
+| Phylum versions | `#/phylum` | `GET /v1/phylum-versions` |
+
+The box in the header opens a block (a number) or a transaction (an ID).
+
+Values show as formatted JSON, as text, or as a hex dump for base64 (the
+first 4 KiB). A key's U+0000 (the Fabric composite key separator) shows as
+`␀`. The UI puts ledger values in the page as text only, and its pages carry
+a Content-Security-Policy that allows only the UI's own scripts and calls to
+its own origin.
+
+Values can hold personal data, so keep the default `--listen` on 127.0.0.1.

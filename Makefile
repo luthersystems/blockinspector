@@ -1,5 +1,6 @@
 BIN=./build/blockinspector
 GO_FILES=$(shell find . -name '*.go')
+UI_FILES=$(shell find internal/explorer/ui -type f)
 
 .PHONY: default
 default: build
@@ -9,7 +10,7 @@ default: build
 build: ${BIN}
 	@
 
-${BIN}: ${GO_FILES}
+${BIN}: ${GO_FILES} ${UI_FILES}
 	mkdir -p $(dir $@)
 	go build -o $@ ./cmd/blockinspector
 
@@ -31,8 +32,8 @@ go-test:
 install:
 	go install ./cmd/blockinspector
 
-# explorer serves the block explorer API for a local fabric-network-builder
-# network, over mutual TLS. NETWORK_DIR is the directory that holds the
+# explorer serves the block explorer (web UI and API) for a local
+# fabric-network-builder network, over mutual TLS. NETWORK_DIR is the directory that holds the
 # network's crypto-config/ (a project's fabric/ directory). For example:
 #   make explorer NETWORK_DIR=../ui-core/fabric
 NETWORK_DIR ?=

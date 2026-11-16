@@ -276,3 +276,41 @@ func TestServerPreflight(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	assert.Equal(t, "Last-Event-ID", resp.Header.Get("Access-Control-Allow-Headers"))
 }
+
+func TestServerUI(t *testing.T) {
+	srv := testServer(t, testIndex(t), ServerOptions{})
+
+	for _, tc := range []struct {
+		path, contentType, contains string
+	}{
+		{"/", "text/html; charset=utf-8", `<script src="app.js" defer></script>`},
+		{"/app.js", "text/javascript; charset=utf-8", "/v1/stream/blocks"},
+		{"/app.css", "text/css; charset=utf-8", "--mono"},
+	} {
+		resp, err := http.Get(srv.URL + tc.path)
+		require.NoError(t, err)
+		body := new(strings.Builder)
+		_, err = bufio.NewReader(resp.Body).WriteTo(body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusOK, resp.StatusCode, tc.path)
+		assert.Equal(t, tc.contentType, resp.Header.Get("Content-Type"), tc.path)
+		assert.Equal(t, uiCSP, resp.Header.Get("Content-Security-Policy"), tc.path)
+		assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"), tc.path)
+		assert.Contains(t, body.String(), tc.contains, tc.path)
+	}
+
+	// The UI loads no inline script or style, which the policy refuses.
+	index, err := uiFiles.ReadFile("ui/index.html")
+	require.NoError(t, err)
+	assert.NotContains(t, string(index), "<script>")
+	assert.NotContains(t, string(index), "<style")
+	assert.NotContains(t, string(index), " style=")
+
+	// An unknown API path is a JSON 404, not a UI file.
+	getJSON(t, srv, "/v1/nope", http.StatusNotFound, nil)
+	resp, err := http.Get(srv.URL + "/nope.js")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}

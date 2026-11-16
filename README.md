@@ -100,7 +100,7 @@ This command reads the peer's LevelDB state database offline and lists private d
 
 **Important**: The peer process must be stopped before running this command, as LevelDB holds a file lock.
 
-### Serve the Block Explorer API
+### Serve the Block Explorer
 
 ```bash
 blockinspector serve --network-dir <NETWORKDIR> [--channel luther] [--listen 127.0.0.1:8090]
@@ -110,11 +110,12 @@ make explorer NETWORK_DIR=<NETWORKDIR>
 Example — explore a local network that fabric-network-builder started:
 ```bash
 make explorer NETWORK_DIR=../ui-core/fabric
+open http://127.0.0.1:8090/
 curl -s localhost:8090/v1/blocks
 curl -sN localhost:8090/v1/stream/blocks
 ```
 
-This command pulls the channel's blocks from a peer's deliver service over mutual TLS, with the network's own client identity from `crypto-config/`, so it works with peers that require client TLS. It serves JSON views of blocks, transactions, key history, framework keys and phylum versions, and streams new blocks as server-sent events. `--ledger-dir` serves block files offline instead. See [docs/api.md](docs/api.md).
+This command pulls the channel's blocks from a peer's deliver service over mutual TLS, with the network's own client identity from `crypto-config/`, so it works with peers that require client TLS. It serves JSON views of blocks, transactions, key history, framework keys and phylum versions, and streams new blocks as server-sent events. A web UI on `/` shows the same views and follows new blocks. `--ledger-dir` serves block files offline instead. See [docs/api.md](docs/api.md).
 
 ### Parameters
 
