@@ -213,7 +213,8 @@ func (s *Server) handleTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := q.Get("before_index"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 || f.Before == 0 {
+		// With before_index, before=0 is block 0: a page can end inside it.
+		if err != nil || n < 0 || !q.Has("before") {
 			writeError(w, http.StatusBadRequest, "before_index: a non-negative integer, with before")
 			return
 		}

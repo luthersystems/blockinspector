@@ -43,17 +43,27 @@
     while (el.firstChild) el.removeChild(el.firstChild);
   }
 
-  function hashLink(path, params) {
-    let s = "#" + path;
-    if (params) {
-      const q = new URLSearchParams();
-      for (const [k, v] of Object.entries(params)) {
-        if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
-      }
-      const qs = q.toString();
-      if (qs) s += "?" + qs;
+  // withQuery appends params to a path as a query string, leaving out empty
+  // values. Hash links and API calls both use it.
+  function withQuery(path, params) {
+    if (!params) return path;
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
     }
-    return s;
+    const qs = q.toString();
+    return qs ? path + "?" + qs : path;
+  }
+
+  function hashLink(path, params) {
+    return withQuery("#" + path, params);
+  }
+
+  // go shows a page. Setting the hash it already has fires no hashchange,
+  // so then it renders again (a repeated filter or search refreshes).
+  function go(hash) {
+    if (location.hash === hash) route();
+    else location.hash = hash;
   }
 
   function blockLink(n) {
@@ -117,14 +127,17 @@
     return tx.method || "";
   }
 
-  function table(headers, rows) {
+  // table builds a table. A header that starts with "#" is a number
+  // column. body is a tbody element (for a list that grows) or its rows.
+  function table(headers, body) {
+    const tbody = body instanceof HTMLTableSectionElement ? body : h("tbody", null, body);
     return h("div", { class: "wrap" },
       h("table", null,
         h("thead", null, h("tr", null, headers.map((x) => {
           const num = x.startsWith("#");
           return h("th", { class: num ? "num" : null }, num ? x.slice(1) : x);
         }))),
-        h("tbody", null, rows)));
+        tbody));
   }
 
   function fields(pairs) {
@@ -236,16 +249,7 @@
   // ---- API ----------------------------------------------------------------
 
   async function api(path, params) {
-    let url = path;
-    if (params) {
-      const q = new URLSearchParams();
-      for (const [k, v] of Object.entries(params)) {
-        if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
-      }
-      const qs = q.toString();
-      if (qs) url += "?" + qs;
-    }
-    const resp = await fetch(url, { headers: { Accept: "application/json" } });
+    const resp = await fetch(withQuery(path, params), { headers: { Accept: "application/json" } });
     let body = null;
     try {
       body = await resp.json();
@@ -263,10 +267,25 @@
   // ---- Status bar ---------------------------------------------------------
 
   let lastStatus = null;
+  let statusSeq = 0;
+  let statusTimer = null;
+
+  // scheduleStatus refreshes the status bar soon, once for a burst of new
+  // blocks.
+  function scheduleStatus() {
+    if (statusTimer) return;
+    statusTimer = setTimeout(() => {
+      statusTimer = null;
+      refreshStatus();
+    }, 500);
+  }
 
   async function refreshStatus() {
+    const seq = ++statusSeq;
     try {
       const st = await api("/v1/status");
+      // A newer request is on its way or done: do not draw an older answer.
+      if (seq !== statusSeq) return;
       lastStatus = st;
       const src = st.source || {};
       const ok = src.connected || src.done;
@@ -282,6 +301,7 @@
         src.last_error ? [" · ", h("span", { class: "err", title: src.last_error_at || "" }, "last error: " + src.last_error)] : null,
       ]);
     } catch (e) {
+      if (seq !== statusSeq) return;
       clear(statusEl);
       append(statusEl, [h("span", { class: "dot bad" }), h("span", { class: "err" }, "API unreachable: " + e.message)]);
     }
@@ -373,11 +393,7 @@
   async function pageBlocks(ctx) {
     const data = await api("/v1/blocks", { limit: 50 });
     const tbody = h("tbody", null, data.blocks.map((b) => blockRow(b, false)));
-    const tbl = h("div", { class: "wrap" }, h("table", null,
-      h("thead", null, h("tr", null,
-        h("th", { class: "num" }, "Block"), h("th", null, "Time"), h("th", { class: "num" }, "Valid transactions"),
-        h("th", null, ""), h("th", null, "Data hash"), h("th", { class: "num" }, "Size"))),
-      tbody));
+    const tbl = table(["#Block", "Time", "#Valid transactions", "", "Data hash", "#Size"], tbody);
     const live = h("span", { class: "muted" }, "Following new blocks…");
     let nextBefore = data.next_before;
     const more = h("button", { class: "more" }, "Older blocks");
@@ -402,8 +418,10 @@
     // missed between the list and the stream. EventSource resends the last
     // block number (Last-Event-ID) when it reconnects.
     const seen = new Set(data.blocks.map((b) => b.number));
-    const top = data.blocks.length ? data.blocks[0].number + 1 : null;
-    const url = top === null ? "/v1/stream/blocks" : "/v1/stream/blocks?from=" + top;
+    // With no block listed, start at the first block the explorer holds
+    // (from=0), so a block indexed before the stream connects still shows.
+    const from = data.blocks.length ? data.blocks[0].number + 1 : 0;
+    const url = "/v1/stream/blocks?from=" + from;
     const es = new EventSource(url);
     stream = es;
     es.addEventListener("open", () => {
@@ -411,7 +429,10 @@
       live.className = "muted";
     });
     es.addEventListener("error", () => {
-      live.textContent = "Stream disconnected; reconnecting…";
+      // The browser retries a dropped stream, but not a refused one.
+      live.textContent = es.readyState === EventSource.CLOSED
+        ? "Stream closed. Reload the page to follow new blocks."
+        : "Stream disconnected; reconnecting…";
       live.className = "error";
     });
     es.addEventListener("block", (ev) => {
@@ -433,7 +454,7 @@
         }
       }
       tbody.insertBefore(row, before);
-      refreshStatus();
+      scheduleStatus();
     });
   }
 
@@ -455,10 +476,9 @@
     const b = await api("/v1/blocks/" + n);
     const prev = n > 0 ? h("a", { href: hashLink("/blocks/" + (n - 1)) }, "← Block " + (n - 1)) : null;
     const next = h("a", { href: hashLink("/blocks/" + (n + 1)) }, "Block " + (n + 1) + " →");
-    const height = lastStatus ? lastStatus.height : null;
     render(ctx.isCurrent,
       h("h1", null, "Block " + n),
-      h("div", { class: "pager" }, prev, height === null || n + 1 < height ? next : null),
+      h("div", { class: "pager" }, prev, next),
       fields([
         ["Time", fmtTime(b.time)],
         ["Transactions", b.valid_tx_count + " valid of " + b.tx_count],
@@ -491,7 +511,7 @@
       h("button", { type: "submit" }, "Filter"));
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
-      location.hash = hashLink("/transactions", { method: methodIn.value.trim(), valid: validSel.value });
+      go(hashLink("/transactions", { method: methodIn.value.trim(), valid: validSel.value }));
     });
 
     const tbody = h("tbody", null, data.transactions.map((tx) => txRow(tx, { block: true, time: true })));
@@ -516,10 +536,7 @@
     render(ctx.isCurrent,
       h("h1", null, "Transactions"),
       form,
-      h("div", { class: "wrap" }, h("table", null,
-        h("thead", null, h("tr", null, ["Block", "Index", "ID", "Type", "Validation", "Creator MSP", "Chaincode", "Method", "Time"]
-          .map((x) => h("th", { class: x === "Block" || x === "Index" ? "num" : null }, x)))),
-        tbody)),
+      table(["#Block", "#Index", "ID", "Type", "Validation", "Creator MSP", "Chaincode", "Method", "Time"], tbody),
       data.transactions.length ? null : h("p", { class: "muted" }, "No transactions match."),
       more);
   }
@@ -534,7 +551,8 @@
     if (rw.reads && rw.reads.length) {
       parts.push(table(["Read key", "Version (block:tx)"], rw.reads.map((r) =>
         h("tr", null,
-          h("td", null, keyLink(rw.namespace, r.key)),
+          // A key read with no version was never written: it has no history.
+          h("td", null, r.version ? keyLink(rw.namespace, r.key) : keyText(r.key)),
           h("td", { class: "mono" }, r.version ? r.version.block + ":" + r.version.tx : "none")))));
     }
     if (rw.range_queries) parts.push(h("p", { class: "muted" }, rw.range_queries + " range queries"));
@@ -622,7 +640,7 @@
       h("button", { type: "submit" }, "Filter"));
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
-      location.hash = hashLink("/keys", { kind: q.kind, space: q.space, namespace: nsIn.value.trim(), prefix: prefixIn.value });
+      go(hashLink("/keys", { kind: q.kind, space: q.space, namespace: nsIn.value.trim(), prefix: prefixIn.value }));
     });
 
     const tbody = h("tbody", null, data.keys.map(keyRow));
@@ -650,10 +668,7 @@
       form,
       h("p", { class: "muted" }, "Keys that valid transactions wrote, with their last write. ",
         h("a", { href: hashLink("/framework") }, "Key spaces"), " groups the framework keys."),
-      h("div", { class: "wrap" }, h("table", null,
-        h("thead", null, h("tr", null, ["Namespace", "Key", "Space", "#Writes", "#Size", "Last write", "Time"]
-          .map((x) => h("th", { class: x.startsWith("#") ? "num" : null }, x.replace("#", ""))))),
-        tbody)),
+      table(["Namespace", "Key", "Space", "#Writes", "#Size", "Last write", "Time"], tbody),
       data.keys.length ? null : h("p", { class: "muted" }, "No keys match."),
       more);
   }
@@ -753,7 +768,7 @@
     const input = document.getElementById("search-input");
     const v = input.value.trim();
     if (!v) return;
-    location.hash = /^\d+$/.test(v) ? hashLink("/blocks/" + v) : hashLink("/tx/" + encodeURIComponent(v));
+    go(/^\d+$/.test(v) ? hashLink("/blocks/" + v) : hashLink("/tx/" + encodeURIComponent(v)));
     input.value = "";
   });
 

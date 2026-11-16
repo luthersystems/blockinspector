@@ -264,6 +264,17 @@ func TestTransactionsPaging(t *testing.T) {
 	assert.Equal(t, ids, got)
 	getJSON(t, srv, "/v1/transactions?before_index=1", http.StatusBadRequest, nil)
 	getJSON(t, srv, "/v1/transactions?before=2&before_index=-1", http.StatusBadRequest, nil)
+
+	// A page can end inside block 0: its cursor is before=0 with an index,
+	// which selects block 0's earlier transactions, not the tip.
+	var block0 TransactionsResponse
+	getJSON(t, srv, "/v1/transactions?before=0&before_index=1", http.StatusOK, &block0)
+	require.Len(t, block0.Transactions, 1)
+	assert.Equal(t, uint64(0), block0.Transactions[0].BlockNumber)
+	assert.Equal(t, 0, block0.Transactions[0].Index)
+	assert.Nil(t, block0.Next)
+	getJSON(t, srv, "/v1/transactions?before=0&before_index=0", http.StatusOK, &block0)
+	assert.Empty(t, block0.Transactions)
 }
 
 func TestServerPreflight(t *testing.T) {

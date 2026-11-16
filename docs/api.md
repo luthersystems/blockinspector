@@ -65,7 +65,7 @@ All responses are JSON. An error is `{"error": "..."}` with a 4xx status.
 | `GET /v1/status` | Channel, height, first block, and the source's state (`connected`, `last_error`) |
 | `GET /v1/blocks?before=N&limit=20` | Block summaries, newest first, below block `before` (the tip when absent). `next_before` is the next page's `before`. `limit` 1 to 500 |
 | `GET /v1/blocks/{number}` | A block summary with its transaction summaries |
-| `GET /v1/transactions?method=M&valid=true&before=N&limit=50` | Transaction summaries, newest first. `method` also matches a method in a JSON-RPC batch. `limit` 1 to 1000. A full page has `next` (`before`, `before_index`): pass both to get the next page, which can start inside a block |
+| `GET /v1/transactions?method=M&valid=true&before=N&limit=50` | Transaction summaries, newest first. `method` also matches a method in a JSON-RPC batch. `limit` 1 to 1000. A full page has `next` (`before`, `before_index`): pass both to get the next page, which can start inside a block (with `before_index`, `before=0` is block 0) |
 | `GET /v1/transactions/{id}` | The transaction page |
 | `GET /v1/keys?namespace=&prefix=&kind=&space=&limit=100` | Keys that valid transactions wrote, sorted, with their last write. `kind` is `phylum` or `framework`; `space` is one framework space. Page with `after_namespace` and `after_key` from `next` |
 | `GET /v1/keys/history?namespace=NS&key=K` | Each valid write of a key, oldest first, with the value before and after |
