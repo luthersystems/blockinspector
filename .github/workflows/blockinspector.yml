@@ -41,7 +41,7 @@ jobs:
     if: needs.changes.outputs.code != 'false'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # go.mod's toolchain line is the one statement of the Go version, so CI
       # builds with the same Go that `go install` uses.
       - uses: actions/setup-go@v6
